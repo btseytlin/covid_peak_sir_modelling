@@ -5,7 +5,6 @@ from scipy.integrate import odeint
 
 def sir_step_one_stain(initial_conditions, t, population, beta, gamma):
     S, I, R = initial_conditions
-    
     new_infected = beta * I * (S / population)
     new_recovered = gamma * I 
     
@@ -61,7 +60,7 @@ class SIROneStain(BaseModel):
     def fit(self, data, y):
 
         param_hints = {"beta": (1.2, 0.5, 2), 
-                        "gamma": (0.009, 0, 1)} 
+                        "gamma": (1/3, 1/9, 1/2)} 
 
         def fitter(x, beta, gamma):
             initial_conditions = self.get_initial_coditions(data.iloc[x[0]].infected, data.iloc[x[0]].total_recovered)
@@ -102,11 +101,20 @@ class SIROneStain(BaseModel):
 
 
 class SEIROneStain(BaseModel):
-    def __init__(self, population, beta=None, gamma=None, delta=None):
+    def __init__(self, population, beta=None, gamma=None, delta=1/9):
         self.population = population
         self.beta = beta
         self.gamma = gamma
         self.delta = delta
+
+    def get_initial_coditions(self, infected, total_recovered):
+
+        E0 = infected - self.delta * infected
+        I0 = self.delta * infected
+        Rec0 = total_recovered
+        S0 = self.population - I0 - E0 - Rec0
+        return (S0, E0, I0, Rec0)
+
 
     def fit(self, data, y):
 
@@ -115,13 +123,8 @@ class SEIROneStain(BaseModel):
                "delta": (1/9, 0, 1)}  
 
         def fitter(x, beta, gamma, delta):
-            # Initial conditions
-            E0 = data.iloc[x[0]].infected - delta * data.iloc[x[0]].infected
-            I0 = delta * data.iloc[x[0]].infected
-            Rec0 = data.iloc[x[0]].total_recovered
-            S0 = self.population - I0 - E0 - Rec0
-            initial_conditions = (S0, E0, I0, Rec0)
-            S, E, I, R = SEIROneStain(self.population, beta, gamma, delta).predict(x, initial_conditions)
+            initial_conditions = self.get_initial_coditions(data.iloc[x[0]].infected, data.iloc[x[0]].total_recovered)
+            S, E, I, R = SEIROneStain(self.population, beta, gamma, delta)._predict(x, initial_conditions)
             return I
 
         mod = lmfit.Model(fitter)
@@ -140,11 +143,21 @@ class SEIROneStain(BaseModel):
         self.delta = best_params['delta']
         return self
 
-    def predict(self, t, initial_conditions):
+    def _predict(self, t, initial_conditions):
         ret = odeint(seir_step_one_stain, initial_conditions, t, 
             args=(self.population, self.beta, self.gamma, self.delta))
         S, E, I, R = ret.T
         return S, E, I, R
+
+    def predict(self, data, steps=None):
+        initial_conditions = self.get_initial_coditions(data.iloc[0].infected, data.iloc[0].total_recovered)
+        if steps is None:
+            steps = len(data)
+
+        t = np.arange(steps)
+        return self._predict(t, initial_conditions)
+
+    
 
 
 
