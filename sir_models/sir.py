@@ -74,8 +74,18 @@ def sir_simulate(initial_conditions, t, population, beta, gamma, alpha, rho):
 
     return S_values, I_values, R_values, D_values
 
+def get_initial_coditions(population, i0):
+    I0 = i0
+    Rec0 = 0
+    S0 = population - I0 - Rec0
+    D0 = 0
+    return (S0, I0, Rec0, D0)
 
-def residual(params, t, target, initial_conditions, model_class):
+
+def residual(params, t, target, model_class):
+    initial_conditions = get_initial_coditions(
+                                                params['population'],
+                                                params['i0'])
     model = model_class(population=params['population'],
                         beta=params['beta'],
                         gamma=params['gamma'],
@@ -84,7 +94,9 @@ def residual(params, t, target, initial_conditions, model_class):
     S, I, R, D = model._predict(t, initial_conditions)
 
     residuals = np.concatenate([
-            D - target,
+            D - target[:, 0],
+            # 0.1*(I - target[:, 1]),
+            # 0.1*(R - target[:, 2]),
         ]).flatten()
 
     return residuals
@@ -96,46 +108,45 @@ class SIROneStain:
                         gamma=None, # Recovery rate
                         alpha=None, # Fatality rate
                         rho=None, # 22 days exposed -> dead
+                        i0=None, # Number of infected on day 0
                 ):
         self.population = population
         self.beta = beta
         self.gamma = gamma
         self.alpha = alpha
         self.rho = rho
+        self.i0 = i0
 
         self.fit_result_ = None
 
-    def get_initial_coditions(self, infected, total_recovered):
-        I0 = infected
-        Rec0 = total_recovered
-        S0 = self.population - I0 - Rec0
-        D0 = 0
-        return (S0, I0, Rec0, D0)
+        self.train_data = None
 
 
-    def fit(self, data, y):
+    def fit(self, data):
+        self.train_data = data
+
+        y = data[['total_dead']].values
         params = Parameters()
         params.add("population", value=self.population, vary=False)
-        params.add("beta", value=1.2, min=0, max=3, vary=True)
-        params.add("gamma", value=1/23, min=0, max=1, vary=False)
-        params.add("alpha", value=0.018, min=0, max=0.1, vary=False)
+        params.add("beta", value=1.2, min=0, max=10, vary=True)
+        params.add("gamma", value=1/11, min=0, max=1, vary=False)
+        params.add("alpha", value=0.018, min=0, max=0.2, vary=True)
         params.add("rho", value=1/22, min=0, max=1/12, vary=False)
+        params.add("i0", value=1000, min=0, max=self.population, vary=True)
 
-        initial_conditions = self.get_initial_coditions(data.iloc[0].infected, 
-            data.iloc[0].total_recovered)
         t = np.arange(len(data))
 
-        minimize_resut = minimize(residual, params, 
-            args=(t, y, initial_conditions, SIROneStain))
+        minimize_resut = minimize(residual, params, args=(t, y, SIROneStain))
 
 
         self.fit_result_  = minimize_resut
 
-        best_params = self.fit_result_ .params
+        best_params = self.fit_result_.params
         self.beta = best_params['beta']
         self.gamma = best_params['gamma']
         self.alpha = best_params['alpha']
         self.rho = best_params['rho']
+        self.i0 = best_params['i0']
         return self
 
 
@@ -145,10 +156,14 @@ class SIROneStain:
         return ret.T
         #return sir_simulate(initial_conditions, t, self.population, self.beta, self.gamma, self.alpha, self.rho)
 
-    def predict(self, data, steps=None):
-        initial_conditions = self.get_initial_coditions(data.iloc[0].infected, data.iloc[0].total_recovered)
-        if steps is None:
-            steps = len(data)
+    def predict_train(self):
+        train_data_steps = np.arange(len(self.train_data))
 
-        t = np.arange(steps)
-        return self._predict(t, initial_conditions)
+        train_initial_conditions = get_initial_coditions(self.population, self.i0)
+        return self._predict(train_data_steps, train_initial_conditions)
+
+    def predict_test(self, t):
+        S, I, R, D = self.predict_train()
+
+        test_initial_conditions = (S[-1], I[-1], R[-1], D[-1])
+        return self._predict(t, test_initial_conditions)
