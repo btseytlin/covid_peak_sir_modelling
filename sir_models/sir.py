@@ -11,7 +11,6 @@ def sir_step_one_stain(initial_conditions, t, population, beta, gamma, alpha, rh
     new_dead = alpha * rho * I
     new_recovered = gamma * (1-alpha) * I 
 
-    
     dSdt = -new_infected
     dIdt = new_infected - new_recovered - new_dead
     dRdt = new_recovered
@@ -83,9 +82,8 @@ def get_initial_coditions(population, i0):
 
 
 def residual(params, t, target, model_class):
-    initial_conditions = get_initial_coditions(
-                                                params['population'],
-                                                params['i0'])
+    initial_conditions = get_initial_coditions(params['population'],
+                                              params['i0'])
     model = model_class(population=params['population'],
                         beta=params['beta'],
                         gamma=params['gamma'],
@@ -95,12 +93,14 @@ def residual(params, t, target, model_class):
 
     residuals = np.concatenate([
             D - target[:, 0],
-            # 0.1*(I - target[:, 1]),
+            (I.cumsum() - target[:, 1]),
             # 0.1*(R - target[:, 2]),
         ]).flatten()
 
     return residuals
 
+# S -> I -> R 
+#        -> D
 
 class SIROneStain:
     def __init__(self, population, 
@@ -122,22 +122,26 @@ class SIROneStain:
         self.train_data = None
 
 
-    def fit(self, data):
-        self.train_data = data
-
-        y = data[['total_dead']].values
+    def get_fit_params(self):
         params = Parameters()
         params.add("population", value=self.population, vary=False)
         params.add("beta", value=1.2, min=0, max=10, vary=True)
         params.add("gamma", value=1/11, min=0, max=1, vary=False)
         params.add("alpha", value=0.018, min=0, max=0.2, vary=True)
-        params.add("rho", value=1/22, min=0, max=1/12, vary=False)
+        params.add("rho", value=1/12, min=0, max=1/12, vary=False)
         params.add("i0", value=1000, min=0, max=self.population, vary=True)
 
+        return params
+
+    def fit(self, data):
+        self.train_data = data
+
+        y = data[['total_dead', 'total_infected']].values
+        
+        params = self.get_fit_params()
+
         t = np.arange(len(data))
-
         minimize_resut = minimize(residual, params, args=(t, y, SIROneStain))
-
 
         self.fit_result_  = minimize_resut
 
