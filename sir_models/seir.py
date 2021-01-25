@@ -33,7 +33,7 @@ def get_initial_coditions(population, i0):
     return (S0, E0, I0, Rec0, D0)
 
 
-def residual(params, t, target, model_class, i0, initial_conditions):
+def residual(params, t, data, target, model_class, i0, initial_conditions):
     model = model_class(population=params['population'],
                         beta=params['beta'],
                         delta=params['delta'],
@@ -41,6 +41,7 @@ def residual(params, t, target, model_class, i0, initial_conditions):
                         alpha=params['alpha'],
                         rho=params['rho'],
                         i0=i0)
+
     S, E, I, R, D = model._predict(t, initial_conditions)
 
     residuals = np.concatenate([
@@ -51,7 +52,7 @@ def residual(params, t, target, model_class, i0, initial_conditions):
     return residuals
 
 # S -> E -> I -> R 
-#        -> D
+#             -> D
 
 class SEIR:
     def __init__(self, population, 
@@ -59,7 +60,7 @@ class SEIR:
                         delta=None, # E -> I rate
                         gamma=None, # I -> R rate
                         alpha=None, # I -> D rate
-                        rho=None, # E -> D rate,
+                        rho=None, # I -> D rate,
                         i0=None,
                 ):
         self.population = population
@@ -81,12 +82,13 @@ class SEIR:
     def get_fit_params(self):
         params = Parameters()
         params.add("population", value=self.population, vary=False)
-        params.add("beta", value=1.2, min=0.3, max=2, vary=True)
-        params.add("gamma", value=1/7, min=0, max=1, vary=False)
-        params.add("delta", value=1/7, min=0, max=1, vary=False)
-        params.add("alpha", value=0.018, min=0.0001, max=0.1, vary=True)
-        params.add("rho", value=1/12, min=0, max=1/12, vary=False)
+        params.add("beta", value=1.2, min=0, max=10, vary=True) # Beta base
+        params.add("gamma", value=1/9.5, vary=False)
+        params.add("delta", value=1/11.2, vary=False)
+        params.add("alpha", value=0.018, min=0, max=0.2, vary=True)
+        params.add("rho", value=1/14, vary=False)
         return params
+
 
     def fit(self, data):
         self.train_data = data
@@ -98,7 +100,7 @@ class SEIR:
         params = self.get_fit_params()
 
         t = np.arange(len(data))
-        minimize_resut = minimize(residual, params, args=(t, y, SEIR, self.i0, train_initial_conditions))
+        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR, self.i0, train_initial_conditions))
 
         self.fit_result_  = minimize_resut
 
