@@ -3,9 +3,32 @@ import lmfit
 from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 
+def stepwise(t, coefficients):
+    base = min(list(coefficients.keys()))
+    last_index = max(list(coefficients.keys()))
+    index = min(max(base, int(base * round(float(t)/base))), last_index)
+    return coefficients[index]
 
 def seir_step(initial_conditions, t, params):
-    population, beta, delta, gamma, alpha, rho = params
+    population = params['population']
+    r0 = params['r0']
+    delta = params['delta']
+    gamma = params['gamma']
+    alpha = params['alpha']
+    rho = params['rho']
+
+
+    q_coefs = {}
+    for key, value in params.items():
+        if key.startswith('t'):
+            coef_t = int(key.split('_')[0][1:])
+            q_coefs[coef_t] = value.value
+
+    quarantine_mult = stepwise(t, q_coefs)
+    rt = quarantine_mult * r0 
+    beta = rt * gamma
+
+
     S, E, I, R, D = initial_conditions
 
     new_exposed = beta * I * (S / population)
@@ -31,31 +54,28 @@ def seir_step(initial_conditions, t, params):
 
 def get_initial_coditions(model, data):
     D0 = data.total_dead.iloc[0]
-    I0 = D0 / model.alpha / model.rho
+    I0 = data.infected.iloc[0]
     E0 = 0
     Rec0 = data.total_recovered.iloc[0]
     S0 = model.population - I0 - Rec0 - E0
     return (S0, E0, I0, Rec0, D0)
 
 
-def residual(params, t, data, target, model_class, i0):
-    model = model_class(population=params['population'],
-                        beta=params['beta'],
-                        delta=params['delta'],
-                        gamma=params['gamma'],
-                        alpha=params['alpha'],
-                        rho=params['rho'],
-                        i0=i0)
-
+def residual(params, t, data, target, model_class):
+    model = model_class(params['population'])
+    model.params = params
     initial_conditions = get_initial_coditions(model, data)
-
     S, E, I, R, D = model._predict(t, initial_conditions)
 
-    residuals = np.concatenate([
-            D - target[:, 0],
-            (I.cumsum() - target[:, 1]),
-        ]).flatten()
+    resid_D = D - target[:, 0]
+    resid_I = I.cumsum() - target[:, 1]
 
+    #print(resid_D.sum(), 1e-3*resid_I.sum())
+    residuals = np.concatenate([
+            resid_D,
+            1e-3*resid_I,
+        ]).flatten()
+    #print((residuals**2).sum())
     return residuals
 
 # S -> E -> I -> R 
@@ -63,33 +83,35 @@ def residual(params, t, data, target, model_class, i0):
 
 class SEIR:
     def __init__(self, population, 
-                        beta=None, # S -> E rate
+                        r0=None,
+                        #beta=None, # S -> E rate
                         delta=None, # E -> I rate
                         gamma=None, # I -> R rate
                         alpha=None, # I -> D rate
                         rho=None, # I -> D rate,
-                        i0=None,
                 ):
         self.population = population
-        self.beta = beta
+        self.r0 = r0
+        #self.beta = beta
         self.gamma = gamma
         self.delta = delta
         self.alpha = alpha
         self.rho = rho
-        self.i0 = i0 
 
         self.fit_result_ = None
 
         self.train_data = None
 
-    @property
-    def params(self):
-        return (self.population, self.beta, self.delta, self.gamma, self.alpha, self.rho)
-
-    def get_fit_params(self):
+    def get_fit_params(self, data):
         params = Parameters()
         params.add("population", value=self.population, vary=False)
-        params.add("beta", value=0.26, min=0, max=10, vary=True)
+        params.add("r0", value=3, vary=False)
+
+        piece_size = 15
+        for t in range(piece_size, len(data), piece_size):
+           params.add(f"t{t}_q", value=1, min=0.3, max=1.0, brute_step=0.1, vary=True)       
+
+        #params.add("beta", value=0.26, min=0, max=10, vary=True)
         params.add("gamma", value=1/9.5, vary=False)
         params.add("delta", value=1/11.2, vary=False)
         params.add("alpha", value=0.018, min=0, max=0.2, vary=False)
@@ -102,16 +124,19 @@ class SEIR:
 
         y = data[['total_dead', 'total_infected']].values
 
-        params = self.get_fit_params()
+        params = self.get_fit_params(data)
+        self.params = params
 
         t = np.arange(len(data))
-        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR, self.i0))
+        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR))
 
         self.fit_result_  = minimize_resut
 
         best_params = self.fit_result_.params
         for param_name, param_value in best_params.items():
             setattr(self, param_name, param_value)
+
+        self.params = self.fit_result_.params
         return self
 
 
