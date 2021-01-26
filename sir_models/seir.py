@@ -24,16 +24,21 @@ def seir_step(initial_conditions, t, params):
     return dSdt, dEdt, dIdt, dRdt, dDdt
 
 
-def get_initial_coditions(population, i0):
-    I0 = i0
+# R = gamma * (1 - alpha) * I
+
+# D = alpha * rho * I
+# I = D / alpha / rho
+
+def get_initial_coditions(model, data):
+    D0 = data.total_dead.iloc[0]
+    I0 = D0 / model.alpha / model.rho
     E0 = 0
-    Rec0 = 0
-    S0 = population - I0 - Rec0 - E0
-    D0 = 0
+    Rec0 = data.total_recovered.iloc[0]
+    S0 = model.population - I0 - Rec0 - E0
     return (S0, E0, I0, Rec0, D0)
 
 
-def residual(params, t, data, target, model_class, i0, initial_conditions):
+def residual(params, t, data, target, model_class, i0):
     model = model_class(population=params['population'],
                         beta=params['beta'],
                         delta=params['delta'],
@@ -41,6 +46,8 @@ def residual(params, t, data, target, model_class, i0, initial_conditions):
                         alpha=params['alpha'],
                         rho=params['rho'],
                         i0=i0)
+
+    initial_conditions = get_initial_coditions(model, data)
 
     S, E, I, R, D = model._predict(t, initial_conditions)
 
@@ -82,25 +89,23 @@ class SEIR:
     def get_fit_params(self):
         params = Parameters()
         params.add("population", value=self.population, vary=False)
-        params.add("beta", value=1.2, min=0, max=10, vary=True) # Beta base
+        params.add("beta", value=0.26, min=0, max=10, vary=True)
         params.add("gamma", value=1/9.5, vary=False)
         params.add("delta", value=1/11.2, vary=False)
-        params.add("alpha", value=0.018, min=0, max=0.2, vary=True)
+        params.add("alpha", value=0.018, min=0, max=0.2, vary=False)
         params.add("rho", value=1/14, vary=False)
         return params
 
 
     def fit(self, data):
         self.train_data = data
-        self.i0 = self.train_data.infected.iloc[0]
-        train_initial_conditions = get_initial_coditions(self.population, self.i0)
 
         y = data[['total_dead', 'total_infected']].values
 
         params = self.get_fit_params()
 
         t = np.arange(len(data))
-        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR, self.i0, train_initial_conditions))
+        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR, self.i0))
 
         self.fit_result_  = minimize_resut
 
@@ -116,7 +121,7 @@ class SEIR:
 
     def predict_train(self):
         train_data_steps = np.arange(len(self.train_data))
-        train_initial_conditions = get_initial_coditions(self.population, self.i0)
+        train_initial_conditions = get_initial_coditions(self, self.train_data)
         return self._predict(train_data_steps, train_initial_conditions)
 
     def predict_test(self, t):
