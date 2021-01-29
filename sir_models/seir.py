@@ -2,6 +2,7 @@ import numpy as np
 import lmfit
 from scipy.integrate import odeint
 from lmfit import Parameters, minimize
+from copy import deepcopy
 
 def stepwise(t, coefficients):
     base = min(list(coefficients.keys()))
@@ -10,7 +11,7 @@ def stepwise(t, coefficients):
     return coefficients[index]
 
 def seir_step(initial_conditions, t, params):
-    population = params['population']
+    sus_population = params['sus_population']
     r0 = params['r0']
     delta = params['delta']
     gamma = params['gamma']
@@ -31,7 +32,7 @@ def seir_step(initial_conditions, t, params):
 
     S, E, I, R, D = initial_conditions
 
-    new_exposed = beta * I * (S / population)
+    new_exposed = beta * I * (S / sus_population)
     new_infected = delta * E
     new_dead = alpha * rho * I
     new_recovered = gamma * (1 - alpha) * I 
@@ -42,7 +43,7 @@ def seir_step(initial_conditions, t, params):
     dRdt = new_recovered
     dDdt = new_dead
 
-    assert S + E + I + R + D - population <= 1e10
+    assert S + E + I + R + D - sus_population <= 1e10
     assert dSdt + dIdt + dEdt + dRdt + dDdt <= 1e10
     return dSdt, dEdt, dIdt, dRdt, dDdt
 
@@ -52,28 +53,50 @@ def seir_step(initial_conditions, t, params):
 # D = alpha * rho * I
 # I = D / alpha / rho
 
+# dI = delta * E
+# E = dI / delta
+# 
+
 def get_initial_coditions(model, data):
-    D0 = data.total_dead.iloc[0]
-    I0 = data.infected.iloc[0]
-    E0 = 0
-    Rec0 = data.total_recovered.iloc[0]
-    S0 = model.population - I0 - Rec0 - E0
+    # Simulate such initial params as to obtain as many deaths as in data
+
+    sus_population = model.params['sus_population']
+    alpha = model.params['alpha']
+    rho = model.params['rho']
+    delta = model.params['delta']
+
+
+    old_params = deepcopy(model.params)
+    for param_name, value in model.params.items():
+        if param_name.startswith('t'):
+            model.params[param_name].value = 1
+
+    t = np.arange(100)
+    S, E, I, R, D = model._predict(t, (sus_population-1, 0, 1, 0, 0))
+    fatality_day = np.argmax(D >= data.iloc[0].total_dead)
+    I0 = I[fatality_day]
+    E0 = E[fatality_day]
+    Rec0 = R[fatality_day]
+    D0 = D[fatality_day]
+    S0 = S[fatality_day]
+
+    model.params = old_params
     return (S0, E0, I0, Rec0, D0)
 
 
-def residual(params, t, data, target, model_class):
-    model = model_class(params['population'])
-    model.params = params
-    initial_conditions = get_initial_coditions(model, data)
+def residual(params, t, data, target, model_class, initial_conditions):
+    model = model_class(params)
+    # initial_conditions = get_initial_coditions(model, data)
+
     S, E, I, R, D = model._predict(t, initial_conditions)
 
     resid_D = D - target[:, 0]
     resid_I = I.cumsum() - target[:, 1]
 
-    #print(resid_D.sum(), 1e-3*resid_I.sum())
+    # print(resid_D.sum(), 1e-3*resid_I.sum())
     residuals = np.concatenate([
             resid_D,
-            1e-3*resid_I,
+            #1e-3*resid_I,
         ]).flatten()
     #print((residuals**2).sum())
     return residuals
@@ -82,40 +105,28 @@ def residual(params, t, data, target, model_class):
 #             -> D
 
 class SEIR:
-    def __init__(self, population, 
-                        r0=None,
-                        #beta=None, # S -> E rate
-                        delta=None, # E -> I rate
-                        gamma=None, # I -> R rate
-                        alpha=None, # I -> D rate
-                        rho=None, # I -> D rate,
-                ):
-        self.population = population
-        self.r0 = r0
-        #self.beta = beta
-        self.gamma = gamma
-        self.delta = delta
-        self.alpha = alpha
-        self.rho = rho
-
-        self.fit_result_ = None
+    def __init__(self, params=None):
+        self.params = params
 
         self.train_data = None
+        self.fit_result_ = None
 
     def get_fit_params(self, data):
         params = Parameters()
-        params.add("population", value=self.population, vary=False)
-        params.add("r0", value=3, vary=False)
+        params.add("base_population", value=12_000_000, vary=False)
+        params.add("pre_existing_immunity", value=0.1806, vary=False)
+        params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
+        params.add("r0", value=3.55, vary=False)
 
-        piece_size = 15
+        piece_size = 30
         for t in range(piece_size, len(data), piece_size):
            params.add(f"t{t}_q", value=1, min=0.3, max=1.0, brute_step=0.1, vary=True)       
 
         #params.add("beta", value=0.26, min=0, max=10, vary=True)
-        params.add("gamma", value=1/9.5, vary=False)
-        params.add("delta", value=1/11.2, vary=False)
-        params.add("alpha", value=0.018, min=0, max=0.2, vary=False)
-        params.add("rho", value=1/14, vary=False)
+        params.add("delta", value=1/5.15, vary=False) # E -> I rate
+        params.add("alpha", value=0.018, min=0, max=0.2, vary=False) # Probability to die if infected
+        params.add("gamma", value=1/3.5, vary=False) # I -> R rate
+        params.add("rho", value=1/14, vary=False) # I -> D rate
         return params
 
 
@@ -124,17 +135,13 @@ class SEIR:
 
         y = data[['total_dead', 'total_infected']].values
 
-        params = self.get_fit_params(data)
-        self.params = params
+        self.params = self.get_fit_params(data)
 
         t = np.arange(len(data))
-        minimize_resut = minimize(residual, params, args=(t, data, y, SEIR))
+        initial_conditions = get_initial_coditions(self, self.train_data)
+        minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIR, initial_conditions))
 
         self.fit_result_  = minimize_resut
-
-        best_params = self.fit_result_.params
-        for param_name, param_value in best_params.items():
-            setattr(self, param_name, param_value)
 
         self.params = self.fit_result_.params
         return self
