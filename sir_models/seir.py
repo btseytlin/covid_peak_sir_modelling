@@ -4,11 +4,29 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 
-def stepwise(t, coefficients):
-    base = min(list(coefficients.keys()))
-    last_index = max(list(coefficients.keys()))
-    index = min(max(base, int(base * round(float(t)/base))), last_index)
+def stepwise(t, coefficients):    
+    t_arr = np.array(list(coefficients.keys()))
+
+    min_index = np.min(t_arr)
+    max_index = np.max(t_arr)
+
+    if t <= min_index:
+        index = min_index
+    elif t >= max_index:
+        index = max_index
+    else:
+        index = np.min(t_arr[t_arr >= t])
     return coefficients[index]
+
+def get_quarantine_multiplier_value(t, params):
+    q_coefs = {}
+    for key, value in params.items():
+        if key.startswith('t'):
+            coef_t = int(key.split('_')[0][1:])
+            q_coefs[coef_t] = value.value
+
+    quarantine_mult = stepwise(t, q_coefs)
+    return quarantine_mult
 
 def seir_step(initial_conditions, t, params):
     sus_population = params['sus_population']
@@ -18,15 +36,8 @@ def seir_step(initial_conditions, t, params):
     alpha = params['alpha']
     rho = params['rho']
 
-
-    q_coefs = {}
-    for key, value in params.items():
-        if key.startswith('t'):
-            coef_t = int(key.split('_')[0][1:])
-            q_coefs[coef_t] = value.value
-
-    quarantine_mult = stepwise(t, q_coefs)
-    rt = quarantine_mult * r0 
+    quarantine_mult = get_quarantine_multiplier_value(t, params)
+    rt = r0 - quarantine_mult * r0 
     beta = rt * gamma
 
 
@@ -48,15 +59,6 @@ def seir_step(initial_conditions, t, params):
     return dSdt, dEdt, dIdt, dRdt, dDdt
 
 
-# R = gamma * (1 - alpha) * I
-
-# D = alpha * rho * I
-# I = D / alpha / rho
-
-# dI = delta * E
-# E = dI / delta
-# 
-
 def get_initial_coditions(model, data):
     # Simulate such initial params as to obtain as many deaths as in data
 
@@ -68,7 +70,7 @@ def get_initial_coditions(model, data):
 
     old_params = deepcopy(model.params)
     for param_name, value in model.params.items():
-        if param_name.startswith('t'):
+        if param_name.startswith('t') and param_name.endswith('_q'):
             model.params[param_name].value = 1
 
     t = np.arange(100)
@@ -81,6 +83,7 @@ def get_initial_coditions(model, data):
     S0 = S[fatality_day]
 
     model.params = old_params
+
     return (S0, E0, I0, Rec0, D0)
 
 
@@ -120,9 +123,20 @@ class SEIR:
 
         piece_size = 30
         for t in range(piece_size, len(data), piece_size):
-           params.add(f"t{t}_q", value=1, min=0.3, max=1.0, brute_step=0.1, vary=True)       
+          params.add(f"t{t}_q", value=0.5, min=0, max=1.0, brute_step=0.1, vary=True)       
 
-        #params.add("beta", value=0.26, min=0, max=10, vary=True)
+        # params.add(f"t10_q", value=0, min=0.3, max=1.0, brute_step=0.1, vary=False)       
+        
+        # # Hard lockdown 05.05.20 - 31.05.20
+        # params.add(f"t42_q", value=0.7, min=0.3, max=1.0, brute_step=0.1, vary=False)       
+
+        # # Soft lockdown
+        # params.add(f"t69_q", value=0.5, min=0.3, max=1.0, brute_step=0.1, vary=False)       
+
+        # # Even softer lockdown
+        # params.add(f"t165_q", value=0.4, min=0.3, max=1.0, brute_step=0.1, vary=False)       
+
+
         params.add("delta", value=1/5.15, vary=False) # E -> I rate
         params.add("alpha", value=0.018, min=0, max=0.2, vary=False) # Probability to die if infected
         params.add("gamma", value=1/3.5, vary=False) # I -> R rate
