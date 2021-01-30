@@ -28,18 +28,26 @@ def get_quarantine_multiplier_value(t, params):
     quarantine_mult = stepwise(t, q_coefs)
     return quarantine_mult
 
-def seir_step(initial_conditions, t, params):
+def beta_fear(t, beta_base, f, fear):
+    vals = beta_base - f * 1/np.exp(fear)
+    if t > len(vals)-1:
+        t = len(vals)-1
+    return vals[int(t)]
+
+def seir_step(initial_conditions, t, params, fear):
     sus_population = params['sus_population']
     r0 = params['r0']
     delta = params['delta']
     gamma = params['gamma']
     alpha = params['alpha']
     rho = params['rho']
+    f = params['f']
 
-    quarantine_mult = get_quarantine_multiplier_value(t, params)
-    rt = r0 - quarantine_mult * r0 
-    beta = rt * gamma
+    # quarantine_mult = get_quarantine_multiplier_value(t, params)
+    # rt = r0 - quarantine_mult * r0 
+    # beta = rt * gamma
 
+    beta = beta_fear(t, r0 * gamma, f, fear)
 
     S, E, I, R, D = initial_conditions
 
@@ -74,7 +82,8 @@ def get_initial_coditions(model, data):
             model.params[param_name].value = 1
 
     t = np.arange(100)
-    S, E, I, R, D = model._predict(t, (sus_population-1, 0, 1, 0, 0))
+    temp_fear = [model.fear[0] for i in t]
+    S, E, I, R, D = model._predict(t, (sus_population-1, 0, 1, 0, 0), temp_fear)
     fatality_day = np.argmax(D >= data.iloc[0].total_dead)
     I0 = I[fatality_day]
     E0 = E[fatality_day]
@@ -87,11 +96,11 @@ def get_initial_coditions(model, data):
     return (S0, E0, I0, Rec0, D0)
 
 
-def residual(params, t, data, target, model_class, initial_conditions):
+def residual(params, t, data, target, model_class, initial_conditions, fear):
     model = model_class(params)
     # initial_conditions = get_initial_coditions(model, data)
 
-    S, E, I, R, D = model._predict(t, initial_conditions)
+    S, E, I, R, D = model._predict(t, initial_conditions, fear)
 
     resid_D = D - target[:, 0]
     resid_I = I.cumsum() - target[:, 1]
@@ -99,7 +108,7 @@ def residual(params, t, data, target, model_class, initial_conditions):
     # print(resid_D.sum(), 1e-3*resid_I.sum())
     residuals = np.concatenate([
             resid_D,
-            #1e-3*resid_I,
+            1e-3*resid_I,
         ]).flatten()
     #print((residuals**2).sum())
     return residuals
@@ -121,9 +130,9 @@ class SEIR:
         params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
         params.add("r0", value=3.55, vary=False)
 
-        piece_size = 30
-        for t in range(piece_size, len(data), piece_size):
-          params.add(f"t{t}_q", value=0.5, min=0, max=1.0, brute_step=0.1, vary=True)       
+        # piece_size = 30
+        # for t in range(piece_size, len(data), piece_size):
+        #   params.add(f"t{t}_q", value=0.5, min=0, max=1.0, brute_step=0.1, vary=True)       
 
         # params.add(f"t10_q", value=0, min=0.3, max=1.0, brute_step=0.1, vary=False)       
         
@@ -141,11 +150,17 @@ class SEIR:
         params.add("alpha", value=0.018, min=0, max=0.2, vary=False) # Probability to die if infected
         params.add("gamma", value=1/3.5, vary=False) # I -> R rate
         params.add("rho", value=1/14, vary=False) # I -> D rate
+
+        params.add("f", value=1, min=0, max=10, vary=True)
         return params
 
 
     def fit(self, data):
         self.train_data = data
+
+        fear = data['infected_per_day']/data['infected_per_day'].rolling(7).mean()
+        fear = fear.rolling(7).mean().fillna(method='bfill').values
+        self.fear = fear
 
         y = data[['total_dead', 'total_infected']].values
 
@@ -153,7 +168,7 @@ class SEIR:
 
         t = np.arange(len(data))
         initial_conditions = get_initial_coditions(self, self.train_data)
-        minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIR, initial_conditions))
+        minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIR, initial_conditions, fear))
 
         self.fit_result_  = minimize_resut
 
@@ -161,17 +176,17 @@ class SEIR:
         return self
 
 
-    def _predict(self, t, initial_conditions):
-        ret = odeint(seir_step, initial_conditions, t, args=(self.params,))
+    def _predict(self, t, initial_conditions, fear):
+        ret = odeint(seir_step, initial_conditions, t, args=(self.params, fear))
         return ret.T
 
     def predict_train(self):
         train_data_steps = np.arange(len(self.train_data))
         train_initial_conditions = get_initial_coditions(self, self.train_data)
-        return self._predict(train_data_steps, train_initial_conditions)
+        return self._predict(train_data_steps, train_initial_conditions, self.fear)
 
     def predict_test(self, t):
         S, E, I, R, D = self.predict_train()
 
         test_initial_conditions = (S[-1], E[-1], I[-1], R[-1], D[-1])
-        return self._predict(t, test_initial_conditions)
+        return self._predict(t, test_initial_conditions, self.fear)
