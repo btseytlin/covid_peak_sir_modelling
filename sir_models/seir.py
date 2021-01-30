@@ -71,7 +71,7 @@ def get_initial_coditions(model, data):
     old_params = deepcopy(model.params)
     for param_name, value in model.params.items():
         if param_name.startswith('t') and param_name.endswith('_q'):
-            model.params[param_name].value = 1
+            model.params[param_name].value = 0
 
     t = np.arange(100)
     S, E, I, R, D = model._predict(t, (sus_population-1, 0, 1, 0, 0))
@@ -89,7 +89,6 @@ def get_initial_coditions(model, data):
 
 def residual(params, t, data, target, model_class, initial_conditions):
     model = model_class(params)
-    # initial_conditions = get_initial_coditions(model, data)
 
     S, E, I, R, D = model._predict(t, initial_conditions)
 
@@ -112,6 +111,8 @@ class SEIR:
         self.params = params
 
         self.train_data = None
+        self.train_initial_conditions = None
+
         self.fit_result_ = None
 
     def get_fit_params(self, data):
@@ -153,6 +154,8 @@ class SEIR:
 
         t = np.arange(len(data))
         initial_conditions = get_initial_coditions(self, self.train_data)
+        self.train_initial_conditions = initial_conditions
+
         minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIR, initial_conditions))
 
         self.fit_result_  = minimize_resut
@@ -167,8 +170,7 @@ class SEIR:
 
     def predict_train(self):
         train_data_steps = np.arange(len(self.train_data))
-        train_initial_conditions = get_initial_coditions(self, self.train_data)
-        return self._predict(train_data_steps, train_initial_conditions)
+        return self._predict(train_data_steps, self.train_initial_conditions)
 
     def predict_test(self, t):
         S, E, I, R, D = self.predict_train()
