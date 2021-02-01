@@ -40,7 +40,6 @@ def seir_step(initial_conditions, t, params):
     rt = r0 - quarantine_mult * r0 
     beta = rt * gamma
 
-
     S, E, I, R, D = initial_conditions
 
     new_exposed = beta * I * (S / sus_population)
@@ -98,7 +97,7 @@ def residual(params, t, data, target, model_class, initial_conditions):
     # print(resid_D.sum(), 1e-3*resid_I.sum())
     residuals = np.concatenate([
             resid_D,
-            #1e-3*resid_I,
+            1e-3*resid_I,
         ]).flatten()
     #print((residuals**2).sum())
     return residuals
@@ -139,7 +138,7 @@ class SEIR:
 
 
         params.add("delta", value=1/5.15, vary=False) # E -> I rate
-        params.add("alpha", value=0.018, min=0, max=0.2, vary=False) # Probability to die if infected
+        params.add("alpha", value=0.018, min=0.008, max=0.04, vary=True) # Probability to die if infected
         params.add("gamma", value=1/3.5, vary=False) # I -> R rate
         params.add("rho", value=1/14, vary=False) # I -> D rate
         return params
