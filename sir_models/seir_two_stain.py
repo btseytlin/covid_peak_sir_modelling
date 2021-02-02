@@ -7,47 +7,67 @@ from copy import deepcopy
 from .utils import get_quarantine_multiplier_value
 
 
-def seir_step(initial_conditions, t, params, history_store):
+def seir_step_two_stain(initial_conditions, t, params, history_store):
     sus_population = params['sus_population']
-    r0 = params['r0']
+    r0_1 = params['r0_1']
+    r0_2 = params['r0_2']
     delta = params['delta']
     gamma = params['gamma']
     alpha = params['alpha']
     rho = params['rho']
 
     quarantine_mult = get_quarantine_multiplier_value(t, params)
-    rt = r0 - quarantine_mult * r0 
-    beta = rt * gamma
+    rt_1 = r0_1 - quarantine_mult * r0_1
+    beta_1 = rt_1 * gamma
 
-    S, E, I, R, D = initial_conditions
+    rt_2 = r0_2 - quarantine_mult * r0_2
+    beta_2 = rt_2 * gamma
 
-    new_exposed = beta * I * (S / sus_population)
-    new_infected = delta * E
-    new_dead = alpha * rho * I
-    new_recovered = gamma * (1 - alpha) * I 
+    S, E1, I1, E2, I2, R, D = initial_conditions
 
-    dSdt = -new_exposed
-    dEdt = new_exposed - new_infected
-    dIdt = new_infected - new_recovered - new_dead
-    dRdt = new_recovered
-    dDdt = new_dead
+    new_exposed1 = beta_1 * I1 * (S / sus_population)
+    new_infected1 = delta * E1
+    new_dead1 = alpha * rho * I1
+    new_recovered1 = gamma * (1 - alpha) * I1
 
-    assert S + E + I + R + D - sus_population <= 1e10
-    assert dSdt + dIdt + dEdt + dRdt + dDdt <= 1e10
+    new_exposed2 = beta_2 * I2 * (S / sus_population)
+    new_infected2 = delta * E2
+    new_dead2 = alpha * rho * I2
+    new_recovered2 = gamma * (1 - alpha) * I2
+
+    dSdt = -new_exposed1 - new_exposed2
+
+    dE1dt = new_exposed1 - new_infected1
+    dI1dt = new_infected1 - new_recovered1 - new_dead1
+
+    dE2dt = new_exposed2 - new_infected2
+    dI2dt = new_infected2 - new_recovered2 - new_dead2
+
+    dRdt = new_recovered1 + new_recovered2
+    dDdt = new_dead1 + new_dead2
+
+    assert sum([S, E1, I1, E2, I2, R, D]) - sus_population <= 1e10
+    assert dSdt + dE1dt + dI1dt + dE2dt + dI2dt + dRdt + dDdt <= 1e10
 
     history_record = {
         't': t,
         'quarantine_mult': quarantine_mult,
-        'rt': rt,
-        'beta': beta,
-        'new_exposed': new_exposed,
-        'new_infected': new_infected,
-        'new_dead': new_dead,
-        'new_recovered': new_recovered,
+        'rt_1': rt_1,
+        'beta_1': beta_1,
+        'rt_2': rt_2,
+        'beta_2': beta_2,
+        'new_exposed1': new_exposed1,
+        'new_infected1': new_infected1,
+        'new_dead1': new_dead1,
+        'new_recovered1': new_recovered1,
+        'new_exposed2': new_exposed2,
+        'new_infected2': new_infected2,
+        'new_dead2': new_dead2,
+        'new_recovered2': new_recovered2,
     }
     history_store.append(history_record)
 
-    return dSdt, dEdt, dIdt, dRdt, dDdt
+    return dSdt, dE1dt, dI1dt, dE2dt, dI2dt, dRdt, dDdt
 
 
 def get_initial_coditions(model, data):
@@ -64,34 +84,37 @@ def get_initial_coditions(model, data):
         if param_name.startswith('t') and param_name.endswith('_q'):
             model.params[param_name].value = 0
 
-    t = np.arange(365)
-    (S, E, I, R, D), history = model._predict(t, (sus_population-1, 0, 1, 0, 0))
+    t = np.arange(400)
+    (S, E1, I1, E2, I2, R, D), history = model._predict(t, (sus_population-1, 0, 1, 0, 0, 0, 0))
+
     fatality_day = np.argmax(D >= data.iloc[0].total_dead)
-    I0 = I[fatality_day]
-    E0 = E[fatality_day]
-    Rec0 = R[fatality_day]
-    D0 = D[fatality_day]
-    S0 = S[fatality_day]
+    I1_0 = I1[fatality_day]
+    E1_0 = E1[fatality_day]
+
+    I2_0 = 0
+    E2_0 = 0
+
+    Rec_0 = R[fatality_day]
+    D_0 = D[fatality_day]
+    S_0 = S[fatality_day]
 
     model.params = old_params
 
-    return (S0, E0, I0, Rec0, D0)
+    return (S_0, E1_0, I1_0, E2_0, I2_0, Rec_0, D_0)
 
 
 def residual(params, t, data, target, model_class, initial_conditions):
     model = model_class(params)
 
-    (S, E, I, R, D), history = model._predict(t, initial_conditions)
+    (S, E1, I1, E2, I2, R, D), history = model._predict(t, initial_conditions)
 
-    resid_D = (D - target['total_dead'])/target['total_dead']
-    resid_I = (I.cumsum() - target['total_infected'])/target['total_infected']
-    resid_R = (R - target['total_recovered'])/target['total_recovered']
+    resid_D = D - target[:, 0]
+    resid_I = (I1 + I2).cumsum() - target[:, 1]
 
-    print(resid_D.mean(), resid_I.mean(), resid_R.mean())
+    # print(resid_D.sum(), 1e-3*resid_I.sum())
     residuals = np.concatenate([
             resid_D,
-            #resid_I,
-            resid_R,
+            #1e-3*resid_I,
         ]).flatten()
     #print((residuals**2).sum())
     return residuals
@@ -99,7 +122,7 @@ def residual(params, t, data, target, model_class, initial_conditions):
 # S -> E -> I -> R 
 #             -> D
 
-class SEIR:
+class SEIRTwoStain:
     def __init__(self, params=None):
         self.params = params
 
@@ -113,11 +136,15 @@ class SEIR:
         params.add("base_population", value=12_000_000, vary=False)
         params.add("pre_existing_immunity", value=0.1806, vary=False)
         params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
-        params.add("r0", value=3.55, vary=False)
+        params.add("r0_1", value=3.55, vary=False)
+        params.add("new_stain_mult", value=1.5, vary=False)
+        params.add("r0_2", expr='r0_1 * new_stain_mult', vary=False)
+
+        #params.add("new_stain_ratio", value=0.001, min=0, max=1, vary=False)
 
         piece_size = 30
         for t in range(piece_size, len(data), piece_size):
-          params.add(f"t{t}_q", value=0.5, min=0, max=0.9, brute_step=0.1, vary=True)       
+         params.add(f"t{t}_q", value=0.5, min=0, max=0.9, brute_step=0.1, vary=True)       
 
         # params.add(f"t10_q", value=0, min=0.3, max=1.0, brute_step=0.1, vary=False)       
         
@@ -132,7 +159,7 @@ class SEIR:
 
 
         params.add("delta", value=1/5.15, vary=False) # E -> I rate
-        params.add("alpha", value=0.018, min=0.008, max=0.04, vary=True) # Probability to die if infected
+        params.add("alpha", value=0.018, min=0.008, max=0.04, vary=False) # Probability to die if infected
         params.add("gamma", value=1/3.5, vary=False) # I -> R rate
         params.add("rho", value=1/14, vary=False) # I -> D rate
         return params
@@ -141,7 +168,7 @@ class SEIR:
     def fit(self, data):
         self.train_data = data
 
-        y = data[['total_dead', 'total_infected', 'total_recovered']]
+        y = data[['total_dead', 'total_infected']].values
 
         self.params = self.get_fit_params(data)
 
@@ -149,7 +176,7 @@ class SEIR:
         initial_conditions = get_initial_coditions(self, self.train_data)
         self.train_initial_conditions = initial_conditions
 
-        minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIR, initial_conditions))
+        minimize_resut = minimize(residual, self.params, args=(t, data, y, SEIRTwoStain, initial_conditions))
 
         self.fit_result_  = minimize_resut
 
@@ -159,7 +186,7 @@ class SEIR:
 
     def _predict(self, t, initial_conditions):
         history = []
-        ret = odeint(seir_step, initial_conditions, t, args=(self.params, history))
+        ret = odeint(seir_step_two_stain, initial_conditions, t, args=(self.params, history))
         history = pd.DataFrame(history)
         history.index = history.t
         return ret.T, history
@@ -169,7 +196,7 @@ class SEIR:
         return self._predict(train_data_steps, self.train_initial_conditions)
 
     def predict_test(self, t):
-        (S, E, I, R, D), history = self.predict_train()
+        (S, E1, I1, E2, I2, R, D), history = self.predict_train()
 
-        test_initial_conditions = (S[-1], E[-1], I[-1], R[-1], D[-1])
+        test_initial_conditions = (S[-1], E1[-1], I1[-1], 0, 10, R[-1], D[-1])
         return self._predict(t, test_initial_conditions)
