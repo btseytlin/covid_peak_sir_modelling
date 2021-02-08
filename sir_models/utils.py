@@ -14,13 +14,3 @@ def stepwise(t, coefficients):
     else:
         index = np.min(t_arr[t_arr >= t])
     return coefficients[index]
-
-def get_quarantine_multiplier_value(t, params):
-    q_coefs = {}
-    for key, value in params.items():
-        if key.startswith('t'):
-            coef_t = int(key.split('_')[0][1:])
-            q_coefs[coef_t] = value.value
-
-    quarantine_mult = stepwise(t, q_coefs)
-    return quarantine_mult
