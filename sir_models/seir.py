@@ -7,8 +7,7 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from .utils import stepwise
 
-
-class DayAheadFitter:
+class BaseFitter:
     def __init__(self, result=None):
         self.result = result
 
@@ -25,6 +24,8 @@ class DayAheadFitter:
         self.result = minimize_resut
         model.params = self.result.params
 
+
+class DayAheadFitter(BaseFitter):
     def residual(self, params, t_vals, data, model):
         model.params = params
 
@@ -59,6 +60,25 @@ class DayAheadFitter:
         # print(residuals[-50:])
         model.maybe_log('Mae:', np.abs(residuals).mean())
         return residuals
+
+
+class CurveFitter(BaseFitter):
+    def residual(self, params, t_vals, data, model):
+        model.params = params
+
+        initial_conditions = model.get_initial_conditions(data)
+        (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=False)
+
+        resid_D = (D - data['total_dead'])
+        resid_I = (I.cumsum() - data['total_infected'])
+        resid_R = (R - data['total_recovered'])
+
+        residuals = np.concatenate([
+            resid_D,
+        ]).flatten()
+        model.maybe_log('MAE:', np.abs(residuals).mean())
+        return residuals
+
 
 # S -> E -> I -> R 
 #             -> D
@@ -143,6 +163,7 @@ class SEIR(BaseModel):
         S0 = S[fatality_day]
         return (S0, E0, I0, Rec0, D0)
 
+
     def get_fit_params(self, data):
         params = Parameters()
         # Non-variable
@@ -152,11 +173,12 @@ class SEIR(BaseModel):
         params.add("r0", value=3.55, vary=False)
 
         params.add("delta", value=1/5.15, vary=False) # E -> I rate
-        params.add("alpha", value=0.0066, min=0.0066, max=0.05, vary=False) # Probability to die if infected
         params.add("gamma", value=1/3.5, vary=False) # I -> R rate
         params.add("rho", value=1/14, vary=False) # I -> D rate
 
         # Variable
+        params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=True) # Probability to die if infected
+
         params.add(f"t0_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
         piece_size = 60
         for t in range(piece_size, len(data), piece_size):
