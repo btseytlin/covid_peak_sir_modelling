@@ -143,7 +143,7 @@ class SIROneStain:
         t = np.arange(len(data))
         minimize_resut = minimize(residual, params, args=(t, y, SIROneStain))
 
-        self.fit_result_  = minimize_resut
+        self.fit_result_ = minimize_resut
 
         best_params = self.fit_result_.params
         self.beta = best_params['beta']
@@ -158,7 +158,6 @@ class SIROneStain:
         ret = odeint(sir_step_one_stain, initial_conditions, t, 
            args=(self.population, self.beta, self.gamma, self.alpha, self.rho))
         return ret.T
-        #return sir_simulate(initial_conditions, t, self.population, self.beta, self.gamma, self.alpha, self.rho)
 
     def predict_train(self):
         train_data_steps = np.arange(len(self.train_data))
