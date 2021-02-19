@@ -26,6 +26,22 @@ class BaseFitter:
 
 
 class DayAheadFitter(BaseFitter):
+    def get_initial_conditions(self, model, data):
+        # Simulate such initial params as to obtain as many deaths as in data
+
+        sus_population = model.params['sus_population']
+
+        t = np.arange(365)
+        (S, E, I, R, D), history = model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
+        fatality_day = np.argmax(D >= data.iloc[-1].total_dead) # Last day!
+
+        I0 = I[fatality_day]
+        E0 = E[fatality_day]
+        Rec0 = R[fatality_day]
+        D0 = D[fatality_day]
+        S0 = S[fatality_day]
+        return (S0, E0, I0, Rec0, D0)
+
     def residual(self, params, t_vals, data, model):
         model.params = params
 
@@ -37,7 +53,7 @@ class DayAheadFitter(BaseFitter):
         preds_R = np.zeros(len(eval_t))
         for i, t in enumerate(eval_t):
             train_data = data.iloc[:t]
-            initial_conditions = model.get_initial_conditions(train_data)
+            initial_conditions = self.get_initial_conditions(model, train_data)
             # print(train_data.iloc[0])
             # print(initial_conditions)
             (S, E, I, R, D), history = model.predict([t-1, t], initial_conditions, history=False)
@@ -63,10 +79,25 @@ class DayAheadFitter(BaseFitter):
 
 
 class CurveFitter(BaseFitter):
+    def get_initial_conditions(self, model, data):
+        # Simulate such initial params as to obtain as many deaths as in data
+        sus_population = model.params['sus_population']
+
+        t = np.arange(365)
+        (S, E, I, R, D), history = model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
+        fatality_day = np.argmax(D >= data.iloc[0].total_dead)
+
+        I0 = I[fatality_day]
+        E0 = E[fatality_day]
+        Rec0 = R[fatality_day]
+        D0 = D[fatality_day]
+        S0 = S[fatality_day]
+        return (S0, E0, I0, Rec0, D0)
+
     def residual(self, params, t_vals, data, model):
         model.params = params
 
-        initial_conditions = model.get_initial_conditions(data)
+        initial_conditions = self.get_initial_conditions(model, data)
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=False)
 
         resid_D = (D - data['total_dead'])
@@ -146,23 +177,6 @@ class SEIR(BaseModel):
             history_store.append(history_record)
 
         return dSdt, dEdt, dIdt, dRdt, dDdt
-
-    def get_initial_conditions(self, data):
-        # Simulate such initial params as to obtain as many deaths as in data
-
-        sus_population = self.params['sus_population']
-
-        t = np.arange(365)
-        (S, E, I, R, D), history = self.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
-        fatality_day = np.argmax(D >= data.iloc[-1].total_dead)
-
-        I0 = I[fatality_day]
-        E0 = E[fatality_day]
-        Rec0 = R[fatality_day]
-        D0 = D[fatality_day]
-        S0 = S[fatality_day]
-        return (S0, E0, I0, Rec0, D0)
-
 
     def get_fit_params(self, data):
         params = Parameters()
