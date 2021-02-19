@@ -129,3 +129,5 @@ dmypy.json
 .pyre/
 
 External/*
+
+data/moscow_prepared.csv
