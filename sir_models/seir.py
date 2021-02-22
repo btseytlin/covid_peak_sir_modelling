@@ -7,8 +7,14 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from .utils import stepwise
 
+
 class BaseFitter:
-    def __init__(self, result=None):
+    def __init__(self,
+                 use_dead=True,
+                 use_recovered=False,
+                 result=None):
+        self.use_dead = use_dead
+        self.use_recovered = use_recovered
         self.result = result
 
     def fit(self, model, data, *args, **kwargs):
@@ -26,6 +32,10 @@ class BaseFitter:
 
 
 class DayAheadFitter(BaseFitter):
+    def __init__(self, *args, n_eval_points=10, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.n_eval_points = n_eval_points
+
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
 
@@ -45,36 +55,36 @@ class DayAheadFitter(BaseFitter):
     def residual(self, params, t_vals, data, model):
         model.params = params
 
-        # print([params[p] for p in params if params[p].vary])
-        eval_t = t_vals[1::10]
-        true_D = np.zeros(len(eval_t))
-        true_R = np.zeros(len(eval_t))
-        preds_D = np.zeros(len(eval_t))
-        preds_R = np.zeros(len(eval_t))
-        for i, t in enumerate(eval_t):
+        eval_every = 1
+        if self.n_eval_points:
+            eval_every = len(data) // self.n_eval_points
+        eval_t = t_vals[1::eval_every]
+        resid_D = []
+        resid_R = []
+
+        iterator = enumerate(eval_t)
+        if model.verbose:
+            iterator = tqdm(iterator, total=len(eval_t))
+
+        for i, t in iterator:
             train_data = data.iloc[:t]
             initial_conditions = self.get_initial_conditions(model, train_data)
-            # print(train_data.iloc[0])
-            # print(initial_conditions)
             (S, E, I, R, D), history = model.predict([t-1, t], initial_conditions, history=False)
-            true_D[i] = data.iloc[t].total_dead
-            true_R[i] = data.iloc[t].total_recovered
-            preds_D[i] = D[-1]
-            preds_R[i] = R[-1]
 
-            # print('True total dead', true_D[i])
-            # print('Pred total dead', preds_D[i])
-            # raise
+            if self.use_dead:
+                resid_D.append((D[-1] - data.iloc[t].total_dead))
+            if self.use_recovered:
+                resid_R.append((R[-1] - data.iloc[t].total_recovered))
 
-        resid_D = (preds_D - true_D) #/(true_D+1e-6)
+        resids = []
+        if self.use_dead:
+            resids.append(resid_D)
+        if self.use_recovered:
+            resids.append(resid_R)
 
-        residuals = np.concatenate([
-            resid_D,
-        ]).flatten()
+        residuals = np.concatenate(resids).flatten()
 
-        # print(residuals[:50])
-        # print(residuals[-50:])
-        model.maybe_log('Mae:', np.abs(residuals).mean())
+        model.maybe_log('Mae:', round(np.abs(residuals).mean(), 4))
         return residuals
 
 
@@ -100,13 +110,15 @@ class CurveFitter(BaseFitter):
         initial_conditions = self.get_initial_conditions(model, data)
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=False)
 
-        resid_D = (D - data['total_dead'])
-        resid_I = (I.cumsum() - data['total_infected'])
-        resid_R = (R - data['total_recovered'])
+        resids = []
+        if self.use_dead:
+            resid_D = (D - data['total_dead'])
+            resids.append(resid_D)
+        if self.use_recovered:
+            resid_R = (R - data['total_recovered'])
+            resids.append(resid_R)
 
-        residuals = np.concatenate([
-            resid_D,
-        ]).flatten()
+        residuals = np.concatenate(resids).flatten()
         model.maybe_log('MAE:', np.abs(residuals).mean())
         return residuals
 
