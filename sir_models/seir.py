@@ -130,12 +130,11 @@ class CurveFitter(BaseFitter):
 
         resids = []
         if self.use_dead:
-            resid_D = (D - data['total_dead'])
+            resid_D = (D - data['total_dead']) / data['total_dead'].std()
             resids.append(resid_D)
         if self.use_recovered:
-            resid_R = (R - data['total_recovered'])
+            resid_R = (R - data['total_recovered']) / data['total_recovered'].std() / 30
             resids.append(resid_R)
-
         residuals = np.concatenate(resids).flatten()
         return residuals
 
@@ -168,7 +167,7 @@ class SEIR(BaseModel):
                 coef_t = int(key.split('_')[0][1:])
                 q_coefs[coef_t] = value.value
 
-        quarantine_mult = stepwise(t, q_coefs)
+        quarantine_mult = stepwise_soft(t, q_coefs)
         rt = r0 - quarantine_mult * r0
         beta = rt * gamma
 
@@ -209,13 +208,13 @@ class SEIR(BaseModel):
         params.add("base_population", value=12_000_000, vary=False)
         params.add("pre_existing_immunity", value=0.1806, vary=False)
         params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
-        params.add("r0", value=3.55, vary=False)
-
-        params.add("delta", value=1/5.15, vary=False) # E -> I rate
-        params.add("gamma", value=1/3.5, vary=False) # I -> R rate
-        params.add("rho", value=1/14, vary=False) # I -> D rate
 
         # Variable
+        params.add("r0", value=3.2, min=2.5, max=4, vary=True)
+        params.add("delta", value=1 / 5.15, min=1/8, max=1/3, vary=True)  # E -> I rate
+        params.add("gamma", value=1 / 3.5, min=1/10, max=1,  vary=True)  # I -> R rate
+        params.add("rho", value=1 / 14, min=1/20, max=1/7, vary=False)  # I -> D rate
+
         params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=True) # Probability to die if infected
 
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)

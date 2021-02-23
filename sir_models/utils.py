@@ -42,7 +42,7 @@ def stepwise_soft(t, coefficients):
     prev_index = np.max(t_arr[t_arr < index])
     # sigmoid smoothing
     q0, q1 = coefficients[prev_index], coefficients[index]
-    r = 10
+    r = 50
     c = 0.5
     out = sigmoid(t, prev_index, index, q0, q1, c, r)
     return out
@@ -62,8 +62,8 @@ def eval_one_day_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_poin
         prev_day = train_df.iloc[-1]
         pred_D = prev_day.total_dead
 
-        model = model_cls(verbose=False)
-        fitter = fitter_cls()
+        model = model_cls()
+        fitter = fitter_cls(verbose=False)
         fitter.fit(model, train_df)
 
         train_initial_conditions = fitter.get_initial_conditions(model, train_df)

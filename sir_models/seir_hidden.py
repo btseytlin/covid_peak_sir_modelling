@@ -15,8 +15,14 @@ class HiddenCurveFitter(BaseFitter):
 
         sus_population = model.params['sus_population']
 
-        t = np.arange(365*2)
-        (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t, (sus_population-1, 0, 1, 0, 0, 0, 0, 0), history=False)
+        new_params = deepcopy(model.params)
+        for key, value in new_params.items():
+            if key.startswith('t'):
+                new_params[key].value = 0
+        new_model = SEIRHidden(params=new_params)
+
+        t = np.arange(365)
+        (S, E, I, Iv, R, Rv, D, Dv), history = new_model.predict(t, (sus_population-1, 0, 1, 0, 0, 0, 0, 0), history=False)
         fatality_day = np.argmax(Dv >= data.iloc[0].total_dead)
 
         S0 = S[fatality_day]
@@ -35,15 +41,16 @@ class HiddenCurveFitter(BaseFitter):
         initial_conditions = self.get_initial_conditions(model, data)
         (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t_vals, initial_conditions, history=False)
 
-        resid_D = (Dv - data['total_dead'])
-        resid_I = (Iv.cumsum() - data['total_infected'])
-        resid_R = (Rv - data['total_recovered'])
+        resids = []
 
-        residuals = np.concatenate([
-            resid_D,
-            # resid_I,
-            resid_R,
-        ]).flatten()
+        if self.use_dead:
+            resid_D = (Dv - data['total_dead']) / data['total_dead'].std()
+            resids.append(resid_D)
+        if self.use_recovered:
+            resid_R = (Rv - data['total_recovered']) / data['total_recovered'].std() / 30
+            resids.append(resid_R)
+
+        residuals = np.concatenate(resids).flatten()
         return residuals
 
 
@@ -116,27 +123,10 @@ class SEIRHidden(SEIR):
         return dSdt, dEdt, dIdt, dIvdt, dRdt, dRvdt, dDdt, dDvdt
 
     def get_fit_params(self, data):
-        params = Parameters()
-        # Non-variable
-        params.add("base_population", value=12_000_000, vary=False)
-        params.add("pre_existing_immunity", value=0.1806, vary=False)
-        params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
-        params.add("r0", value=3.55, vary=False)
-
-        params.add("delta", value=1/5.15, vary=False) # E -> I rate
-        params.add("gamma", value=1/3.5, vary=False) # I -> R rate
-        params.add("rho", value=1/14, vary=False) # I -> D rate
-        params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=False) # Probability to die if infected
+        params = super().get_fit_params(data)
 
         params.add("pi", value=0.5, min=0.01, max=1, vary=True)  # Probability to discover a new infected case in a day
         params.add("pd", value=0.5, min=0.01, max=1, vary=True)  # Probability to discover a death
-
-        # Variable
-        params.add(f"t0_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
-        piece_size = 120
-        for t in range(piece_size, len(data), piece_size):
-          params.add(f"t{t}_q", value=0.5, min=0.3, max=0.99, brute_step=0.1, vary=True)
-
         return params
 
     def predict(self, t, initial_conditions, history=True):
