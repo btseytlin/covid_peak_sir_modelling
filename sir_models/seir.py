@@ -103,22 +103,26 @@ class CurveFitter(BaseFitter):
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
         sus_population = model.params['sus_population']
-        
+
+        first_case_offset = model.params['first_case_offset'].value
+        first_data_point_date = '2020-03-12'
+        first_case_date = pd.to_datetime(first_data_point_date) - pd.to_timedelta(first_case_offset, 'days')
+        days_since_first_case = (data.iloc[0].date - first_case_date).days
+
         new_params = deepcopy(model.params)
         for key, value in new_params.items():
             if key.startswith('t'):
                 new_params[key].value = 0
         new_model = SEIR(params=new_params)
 
-        t = np.arange(365)
+        t = np.arange(days_since_first_case)
         (S, E, I, R, D), history = new_model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
-        fatality_day = np.argmax(D >= data.iloc[0].total_dead)
 
-        I0 = I[fatality_day]
-        E0 = E[fatality_day]
-        Rec0 = R[fatality_day]
-        D0 = D[fatality_day]
-        S0 = S[fatality_day]
+        I0 = I[-1]
+        E0 = E[-1]
+        Rec0 = R[-1]
+        D0 = D[-1]
+        S0 = S[-1]
         return (S0, E0, I0, Rec0, D0)
 
     def residual(self, params, t_vals, data, model):
@@ -216,6 +220,10 @@ class SEIR(BaseModel):
         params.add("rho", value=1/14, vary=False) # I -> D rate
 
         # Variable
+        # First data point: 2020-03-12
+        # Calculate first case date as (2020-03-12 - first_case_offset days)
+        params.add("first_case_offset", value=30, min=0, max=90, vary=True)
+
         params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=True) # Probability to die if infected
 
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)
