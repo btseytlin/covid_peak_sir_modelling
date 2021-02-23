@@ -5,26 +5,38 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 from tqdm.auto import tqdm
-from .utils import stepwise
+from .utils import stepwise, stepwise_soft
 
 
 class BaseFitter:
     def __init__(self,
                  use_dead=True,
                  use_recovered=False,
-                 result=None):
+                 result=None,
+                 verbose=True,
+                 max_iters=None):
         self.use_dead = use_dead
         self.use_recovered = use_recovered
         self.result = result
+        self.verbose = verbose
+        self.max_iters = max_iters
 
     def fit(self, model, data, *args, **kwargs):
         params = model.get_fit_params(data)
         t = np.arange(len(data))
 
+        callback = None
+        if self.verbose:
+            def callback(params, iter, resid, *args, **kwargs):
+                if iter % 10 == 0:
+                    print(f'Iter {iter} | MAE: {np.abs(resid).mean():0.4f}')
+
         minimize_resut = minimize(self.residual,
                                   params,
                                   *args,
                                   args=(t, data, model),
+                                  iter_cb = callback,
+                                  max_nfev = self.max_iters,
                                   **kwargs)
 
         self.result = minimize_resut
@@ -63,7 +75,7 @@ class DayAheadFitter(BaseFitter):
         resid_R = []
 
         iterator = enumerate(eval_t)
-        if model.verbose:
+        if self.verbose:
             iterator = tqdm(iterator, total=len(eval_t))
 
         for i, t in iterator:
@@ -84,7 +96,6 @@ class DayAheadFitter(BaseFitter):
 
         residuals = np.concatenate(resids).flatten()
 
-        model.maybe_log('Mae:', round(np.abs(residuals).mean(), 4))
         return residuals
 
 
@@ -92,9 +103,15 @@ class CurveFitter(BaseFitter):
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
         sus_population = model.params['sus_population']
+        
+        new_params = deepcopy(model.params)
+        for key, value in new_params.items():
+            if key.startswith('t'):
+                new_params[key].value = 0
+        new_model = SEIR(params=new_params)
 
         t = np.arange(365)
-        (S, E, I, R, D), history = model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
+        (S, E, I, R, D), history = new_model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
         fatality_day = np.argmax(D >= data.iloc[0].total_dead)
 
         I0 = I[fatality_day]
@@ -108,6 +125,7 @@ class CurveFitter(BaseFitter):
         model.params = params
 
         initial_conditions = self.get_initial_conditions(model, data)
+
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=False)
 
         resids = []
@@ -119,7 +137,6 @@ class CurveFitter(BaseFitter):
             resids.append(resid_R)
 
         residuals = np.concatenate(resids).flatten()
-        model.maybe_log('MAE:', np.abs(residuals).mean())
         return residuals
 
 
@@ -128,17 +145,13 @@ class CurveFitter(BaseFitter):
 
 
 class BaseModel:
-    def __init__(self, verbose=True):
-        self.verbose = verbose
-
-    def maybe_log(self, *args):
-        if self.verbose:
-            print(*args)
+    pass
 
 
 class SEIR(BaseModel):
-    def __init__(self, *args, params=None, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, stepwise_size=30, params=None):
+        super().__init__()
+        self.stepwise_size = stepwise_size
         self.params = params
 
     def step(self, initial_conditions, t, params, history_store):
@@ -205,8 +218,8 @@ class SEIR(BaseModel):
         # Variable
         params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=True) # Probability to die if infected
 
-        params.add(f"t0_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
-        piece_size = 60
+        params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)
+        piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
           params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
 

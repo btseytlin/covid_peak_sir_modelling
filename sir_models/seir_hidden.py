@@ -44,7 +44,6 @@ class HiddenCurveFitter(BaseFitter):
             # resid_I,
             resid_R,
         ]).flatten()
-        model.maybe_log('MAE:', np.abs(residuals).mean())
         return residuals
 
 
