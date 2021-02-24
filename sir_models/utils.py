@@ -42,7 +42,7 @@ def stepwise_soft(t, coefficients):
     prev_index = np.max(t_arr[t_arr < index])
     # sigmoid smoothing
     q0, q1 = coefficients[prev_index], coefficients[index]
-    r = 50
+    r = 20
     c = 0.5
     out = sigmoid(t, prev_index, index, q0, q1, c, r)
     return out
