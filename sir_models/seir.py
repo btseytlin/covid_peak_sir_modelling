@@ -220,7 +220,7 @@ class SEIR(BaseModel):
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)
         piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
-          params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
+            params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
 
         return params
 
@@ -236,4 +236,5 @@ class SEIR(BaseModel):
             history = pd.DataFrame(history)
             if not history.empty:
                 history.index = history.t
+                history = history[~history.index.duplicated(keep='first')]
         return ret.T, history

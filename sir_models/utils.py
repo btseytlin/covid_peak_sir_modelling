@@ -3,6 +3,15 @@ from sklearn.metrics import mean_absolute_error
 from tqdm.auto import tqdm
 
 
+def compute_daily_values(S, E, I, R, D):
+    new_dead = np.diff(D)
+    new_recovered = np.diff(R)
+    new_infected = np.diff(I) + new_recovered + new_dead
+    new_exposed = np.diff(S[::-1])[::-1]
+
+    return new_exposed, new_infected, new_recovered, new_dead
+
+
 def stepwise(t, coefficients):
     t_arr = np.array(list(coefficients.keys()))
 
