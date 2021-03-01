@@ -5,18 +5,14 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 from tqdm.auto import tqdm
-from .utils import stepwise, stepwise_soft
+from .utils import stepwise_soft, compute_daily_values
 
 
 class BaseFitter:
     def __init__(self,
-                 use_dead=True,
-                 use_recovered=False,
                  result=None,
                  verbose=True,
                  max_iters=None):
-        self.use_dead = use_dead
-        self.use_recovered = use_recovered
         self.result = result
         self.verbose = verbose
         self.max_iters = max_iters
@@ -27,26 +23,39 @@ class BaseFitter:
 
         callback = None
         if self.verbose:
-            def callback(params, iter, resid, *args, **kwargs):
-                if iter % 10 == 0:
-                    print(f'Iter {iter} | MAE: {np.abs(resid).mean():0.4f}')
+            with tqdm(total=self.max_iters) as pbar:
+                def callback(params, iter, resid, *args, **kwargs):
+                    if iter % 10 == 0:
+                        pbar.n = iter
+                        pbar.refresh()
+                        pbar.set_postfix({"MAE": np.abs(resid).mean()})
 
-        minimize_resut = minimize(self.residual,
-                                  params,
-                                  *args,
-                                  args=(t, data, model),
-                                  iter_cb = callback,
-                                  max_nfev = self.max_iters,
-                                  **kwargs)
+                minimize_resut = minimize(self.residual,
+                                          params,
+                                          *args,
+                                          args=(t, data, model),
+                                          iter_cb = callback,
+                                          max_nfev = self.max_iters,
+                                          **kwargs)
+        else:
+            minimize_resut = minimize(self.residual,
+                                      params,
+                                      *args,
+                                      args=(t, data, model),
+                                      iter_cb=callback,
+                                      max_nfev=self.max_iters,
+                                      **kwargs)
 
         self.result = minimize_resut
         model.params = self.result.params
 
 
 class DayAheadFitter(BaseFitter):
-    def __init__(self, *args, n_eval_points=10, **kwargs):
+    def __init__(self, *args, use_dead=True, use_recovered=False, n_eval_points=10, **kwargs):
         super().__init__(*args, **kwargs)
         self.n_eval_points = n_eval_points
+        self.use_dead = use_dead
+        self.use_recovered = use_recovered
 
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
@@ -100,10 +109,23 @@ class DayAheadFitter(BaseFitter):
 
 
 class CurveFitter(BaseFitter):
+    def __init__(self, *args,
+                 total_deaths_col='total_deaths',
+                 new_deaths_col='new_deaths',
+                 total_cases_col='total_cases',
+                 new_cases_col='new_cases',
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.new_deaths_col = new_deaths_col
+        self.total_deaths_col = total_deaths_col
+
+        self.total_cases_col = total_cases_col
+        self.new_cases_col = new_cases_col
+
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
         sus_population = model.params['sus_population']
-        
+
         new_params = deepcopy(model.params)
         for key, value in new_params.items():
             if key.startswith('t'):
@@ -112,7 +134,7 @@ class CurveFitter(BaseFitter):
 
         t = np.arange(365)
         (S, E, I, R, D), history = new_model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
-        fatality_day = np.argmax(D >= data.iloc[0].total_dead)
+        fatality_day = np.argmax(D >= data[self.total_deaths_col].fillna(0).iloc[0])
 
         I0 = I[fatality_day]
         E0 = E[fatality_day]
@@ -126,18 +148,26 @@ class CurveFitter(BaseFitter):
 
         initial_conditions = self.get_initial_conditions(model, data)
 
-        (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=False)
+        (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=True)
+        new_exposed, new_infected, new_recovered, new_dead = compute_daily_values(S, E, I, R, D)
+        cumulative_infected = I.cumsum()
+        true_daily_cases = data[self.new_cases_col][:len(new_infected)].fillna(0)
+        true_daily_deaths = data[self.new_deaths_col][:len(new_dead)].fillna(0)
 
-        resids = []
-        if self.use_dead:
-            resid_D = (D - data['total_dead']) / data['total_dead'].std()
-            resids.append(resid_D)
-        if self.use_recovered:
-            resid_R = (R - data['total_recovered']) / data['total_recovered'].std() / 30
-            resids.append(resid_R)
-        residuals = np.concatenate(resids).flatten()
+        resid_I_total = (cumulative_infected - data[self.total_cases_col]) / (
+                    np.maximum(cumulative_infected, data[self.total_cases_col]) + 1e-10)
+        resid_I_new = (new_infected - true_daily_cases) / (np.maximum(new_infected, true_daily_cases) + 1e-10)
+
+        resid_D_total = (D - data[self.total_deaths_col]) / (np.maximum(D, data[self.total_deaths_col]) + 1e-10)
+        resid_D_new = (new_dead - true_daily_deaths) / (np.maximum(new_dead, true_daily_deaths) + 1e-10)
+
+        residuals = np.concatenate([
+            resid_I_total,
+            resid_I_new,
+            resid_D_total,
+            resid_D_new,
+        ]).flatten()
         return residuals
-
 
 # S -> E -> I -> R 
 #             -> D
@@ -161,13 +191,16 @@ class SEIR(BaseModel):
         alpha = params['alpha']
         rho = params['rho']
 
+        sigmoid_r = params['sigmoid_r']
+        sigmoid_c = params['sigmoid_c']
+
         q_coefs = {}
         for key, value in params.items():
             if key.startswith('t'):
                 coef_t = int(key.split('_')[0][1:])
                 q_coefs[coef_t] = value.value
 
-        quarantine_mult = stepwise_soft(t, q_coefs)
+        quarantine_mult = stepwise_soft(t, q_coefs, r=sigmoid_r, c=sigmoid_c)
         rt = r0 - quarantine_mult * r0
         beta = rt * gamma
 
@@ -209,14 +242,16 @@ class SEIR(BaseModel):
         params.add("pre_existing_immunity", value=0.1806, vary=False)
         params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
 
+        params.add("r0", value=3.5, min=2.5, max=4, vary=False)
+        params.add("rho", value=1 / 14, min=1 / 20, max=1 / 7, vary=False)  # I -> D rate
+        params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=False)  # Probability to die if infected
+
+        params.add("sigmoid_r", value=20, min=1, max=30, vary=False)
+        params.add("sigmoid_c", value=0.5, min=0, max=1, vary=False)
+
         # Variable
-        params.add("r0", value=3.2, min=2.5, max=4, vary=True)
-        params.add("delta", value=1 / 5.15, min=1/8, max=1/3, vary=True)  # E -> I rate
-        params.add("gamma", value=1 / 3.5, min=1/10, max=1,  vary=True)  # I -> R rate
-        params.add("rho", value=1 / 14, min=1/20, max=1/7, vary=False)  # I -> D rate
-
-        params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=True) # Probability to die if infected
-
+        params.add("delta", value=1 / 5.15, min=1 / 8, max=1 / 3, vary=True)  # E -> I rate
+        params.add("gamma", value=1 / 9.5, min=1 / 20, max=1 / 2, vary=True)  # I -> R rate
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)
         piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
