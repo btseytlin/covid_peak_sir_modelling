@@ -125,6 +125,7 @@ class CurveFitter(BaseFitter):
     def get_initial_conditions(self, model, data):
         # Simulate such initial params as to obtain as many deaths as in data
         sus_population = model.params['sus_population']
+        epidemic_started_days_ago = model.params['epidemic_started_days_ago']
 
         new_params = deepcopy(model.params)
         for key, value in new_params.items():
@@ -132,15 +133,14 @@ class CurveFitter(BaseFitter):
                 new_params[key].value = 0
         new_model = SEIR(params=new_params)
 
-        t = np.arange(365)
+        t = np.arange(epidemic_started_days_ago)
         (S, E, I, R, D), history = new_model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
-        fatality_day = np.argmax(D >= data[self.total_deaths_col].fillna(0).iloc[0])
 
-        I0 = I[fatality_day]
-        E0 = E[fatality_day]
-        Rec0 = R[fatality_day]
-        D0 = D[fatality_day]
-        S0 = S[fatality_day]
+        I0 = I[-1]
+        E0 = E[-1]
+        Rec0 = R[-1]
+        D0 = D[-1]
+        S0 = S[-1]
         return (S0, E0, I0, Rec0, D0)
 
     def residual(self, params, t_vals, data, model):
@@ -150,21 +150,15 @@ class CurveFitter(BaseFitter):
 
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=True)
         new_exposed, new_infected, new_recovered, new_dead = compute_daily_values(S, E, I, R, D)
-        cumulative_infected = I.cumsum()
         true_daily_cases = data[self.new_cases_col][:len(new_infected)].fillna(0)
         true_daily_deaths = data[self.new_deaths_col][:len(new_dead)].fillna(0)
 
-        resid_I_total = (cumulative_infected - data[self.total_cases_col]) / (
-                    np.maximum(cumulative_infected, data[self.total_cases_col]) + 1e-10)
         resid_I_new = (new_infected - true_daily_cases) / (np.maximum(new_infected, true_daily_cases) + 1e-10)
 
-        resid_D_total = (D - data[self.total_deaths_col]) / (np.maximum(D, data[self.total_deaths_col]) + 1e-10)
         resid_D_new = (new_dead - true_daily_deaths) / (np.maximum(new_dead, true_daily_deaths) + 1e-10)
 
         residuals = np.concatenate([
-            resid_I_total,
             resid_I_new,
-            resid_D_total,
             resid_D_new,
         ]).flatten()
         return residuals
@@ -248,11 +242,12 @@ class SEIR(BaseModel):
 
         params.add("sigmoid_r", value=20, min=1, max=30, vary=False)
         params.add("sigmoid_c", value=0.5, min=0, max=1, vary=False)
+        params.add("epidemic_started_days_ago", value=10, min=0, max=90, vary=False)
 
         # Variable
         params.add("delta", value=1 / 5.15, min=1 / 8, max=1 / 3, vary=True)  # E -> I rate
         params.add("gamma", value=1 / 9.5, min=1 / 20, max=1 / 2, vary=True)  # I -> R rate
-        params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=True)
+        params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=False)
         piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
             params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
