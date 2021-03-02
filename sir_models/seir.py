@@ -12,32 +12,21 @@ class BaseFitter:
     def __init__(self,
                  result=None,
                  verbose=True,
-                 max_iters=None):
+                 max_iters=None,
+                 brute_params=None):
         self.result = result
         self.verbose = verbose
         self.max_iters = max_iters
+        self.brute_params = brute_params or []
 
-    def fit(self, model, data, *args, **kwargs):
-        params = model.get_fit_params(data)
-        t = np.arange(len(data))
+    def optimize(self, params, t, data, model, args, kwargs):
+        with tqdm(total=self.max_iters) as pbar:
+            def callback(params, iter, resid, *args, **kwargs):
+                if iter % 10 == 0:
+                    pbar.n = iter
+                    pbar.refresh()
+                    pbar.set_postfix({"MAE": np.abs(resid).mean()})
 
-        callback = None
-        if self.verbose:
-            with tqdm(total=self.max_iters) as pbar:
-                def callback(params, iter, resid, *args, **kwargs):
-                    if iter % 10 == 0:
-                        pbar.n = iter
-                        pbar.refresh()
-                        pbar.set_postfix({"MAE": np.abs(resid).mean()})
-
-                minimize_resut = minimize(self.residual,
-                                          params,
-                                          *args,
-                                          args=(t, data, model),
-                                          iter_cb = callback,
-                                          max_nfev = self.max_iters,
-                                          **kwargs)
-        else:
             minimize_resut = minimize(self.residual,
                                       params,
                                       *args,
@@ -45,67 +34,44 @@ class BaseFitter:
                                       iter_cb=callback,
                                       max_nfev=self.max_iters,
                                       **kwargs)
+        return minimize_resut
 
-        self.result = minimize_resut
+    def optimize_brute(self, params, param_name, brute_params, t, data, model, args, kwargs):
+        best_result = None
+        param = params[param_name]
+        assert not param.vary
+        param_min, param_max, param_step = param.min, param.max, param.brute_step
+
+        last_params = deepcopy(params)
+        iterator = tqdm(range(param_min, param_max + 1, param_step))
+        for param_val in iterator:
+            iterator.set_postfix({param_name: param_val})
+
+            temp_params = last_params
+            temp_params[param_name].value = param_val
+            if brute_params:
+                result = self.optimize_brute(temp_params, brute_params[0], brute_params[1:], t, data, model, args, kwargs)
+            else:
+                result = self.optimize(temp_params, t, data, model, args=args, kwargs=kwargs)
+
+            if not best_result or np.mean(np.abs(result.residual)) < np.mean(np.abs(best_result.residual)):
+                best_result = result
+
+            # Start optimization from last best point
+            last_params = deepcopy(result.params)
+
+        return best_result
+
+    def fit(self, model, data, *args, **kwargs):
+        params = model.get_fit_params(data)
+        t = np.arange(len(data))
+
+        if not self.brute_params:
+            self.result = self.optimize(params, t, data, model, args=args, kwargs=kwargs)
+        else:
+            self.result = self.optimize_brute(params, self.brute_params[0], self.brute_params[1:], t, data, model, args, kwargs)
+
         model.params = self.result.params
-
-
-class DayAheadFitter(BaseFitter):
-    def __init__(self, *args, use_dead=True, use_recovered=False, n_eval_points=10, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.n_eval_points = n_eval_points
-        self.use_dead = use_dead
-        self.use_recovered = use_recovered
-
-    def get_initial_conditions(self, model, data):
-        # Simulate such initial params as to obtain as many deaths as in data
-
-        sus_population = model.params['sus_population']
-
-        t = np.arange(365)
-        (S, E, I, R, D), history = model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
-        fatality_day = np.argmax(D >= data.iloc[-1].total_dead) # Last day!
-
-        I0 = I[fatality_day]
-        E0 = E[fatality_day]
-        Rec0 = R[fatality_day]
-        D0 = D[fatality_day]
-        S0 = S[fatality_day]
-        return (S0, E0, I0, Rec0, D0)
-
-    def residual(self, params, t_vals, data, model):
-        model.params = params
-
-        eval_every = 1
-        if self.n_eval_points:
-            eval_every = len(data) // self.n_eval_points
-        eval_t = t_vals[1::eval_every]
-        resid_D = []
-        resid_R = []
-
-        iterator = enumerate(eval_t)
-        if self.verbose:
-            iterator = tqdm(iterator, total=len(eval_t))
-
-        for i, t in iterator:
-            train_data = data.iloc[:t]
-            initial_conditions = self.get_initial_conditions(model, train_data)
-            (S, E, I, R, D), history = model.predict([t-1, t], initial_conditions, history=False)
-
-            if self.use_dead:
-                resid_D.append((D[-1] - data.iloc[t].total_dead))
-            if self.use_recovered:
-                resid_R.append((R[-1] - data.iloc[t].total_recovered))
-
-        resids = []
-        if self.use_dead:
-            resids.append(resid_D)
-        if self.use_recovered:
-            resids.append(resid_R)
-
-        residuals = np.concatenate(resids).flatten()
-
-        return residuals
 
 
 class CurveFitter(BaseFitter):
@@ -236,18 +202,18 @@ class SEIR(BaseModel):
         params.add("pre_existing_immunity", value=0.1806, vary=False)
         params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
 
-        params.add("r0", value=3.5, min=2.5, max=4, vary=False)
         params.add("rho", value=1 / 14, min=1 / 20, max=1 / 7, vary=False)  # I -> D rate
         params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=False)  # Probability to die if infected
 
         params.add("sigmoid_r", value=20, min=1, max=30, vary=False)
         params.add("sigmoid_c", value=0.5, min=0, max=1, vary=False)
-        params.add("epidemic_started_days_ago", value=10, min=0, max=90, vary=False)
+        params.add("epidemic_started_days_ago", value=30, min=1, max=90, brute_step=10, vary=False)
 
+        params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=False)
         # Variable
+        params.add("r0", value=3.5, min=2.5, max=4, vary=True)
         params.add("delta", value=1 / 5.15, min=1 / 8, max=1 / 3, vary=True)  # E -> I rate
         params.add("gamma", value=1 / 9.5, min=1 / 20, max=1 / 2, vary=True)  # I -> R rate
-        params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=False)
         piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
             params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
