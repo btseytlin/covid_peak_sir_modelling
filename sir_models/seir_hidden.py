@@ -58,41 +58,47 @@ class HiddenCurveFitter(CurveFitter):
         ]).flatten()
         return residuals
 
-
-class EnsembleFitter(HiddenCurveFitter):
-    def optimize(self, params, t, data, model, args, kwargs):
-        params_history = []
-        error_history = []
-
-        with tqdm(total=self.max_iters) as pbar:
-            def callback(params, iter, resid, *args, **kwargs):
-                if iter % 10 == 0:
-                    pbar.n = iter
-                    pbar.refresh()
-                    error = np.abs(resid).mean()
-                    pbar.set_postfix({"MARE": error})
-
-                    params_history.append(params)
-                    error_history.append(error)
-
-            minimize_resut = minimize(self.residual,
-                                      params,
-                                      *args,
-                                      args=(t, data, model),
-                                      iter_cb=callback,
-                                      max_nfev=self.max_iters,
-                                      **kwargs)
-
-        weights = softmax(error_history)
-        aggregate_params = deepcopy(params_history[-1])
-        for param_name in params.keys():
-            agg_value = 0
-            for i in range(len(params_history)):
-                agg_value += weights[i] * params_history[i][param_name].value
-            aggregate_params[param_name].value = agg_value
-        minimize_resut.params = aggregate_params
-
-        return minimize_resut
+#
+# class EnsembleFitter(HiddenCurveFitter):
+#     def optimize(self, params, t, data, model, args, kwargs):
+#         params_history = []
+#         error_history = []
+#
+#         with tqdm(total=self.max_iters) as pbar:
+#             def callback(params, iter, resid, *args, **kwargs):
+#                 if iter % 10 == 0:
+#                     pbar.n = iter
+#                     pbar.refresh()
+#                     error = np.abs(resid).mean()
+#                     pbar.set_postfix({"MARE": error})
+#
+#                 if iter % 100 == 0:
+#                     error = np.abs(resid).mean()
+#                     params_history.append(deepcopy(params))
+#                     error_history.append(error)
+#
+#             minimize_resut = minimize(self.residual,
+#                                       params,
+#                                       *args,
+#                                       args=(t, data, model),
+#                                       iter_cb=callback,
+#                                       max_nfev=self.max_iters,
+#                                       **kwargs)
+#
+#         weights = softmax(1-np.array(error_history))
+#         print('errors', error_history)
+#         print('weights', weights)
+#         aggregate_params = deepcopy(params_history[-1])
+#         for param_name in params.keys():
+#             if not aggregate_params[param_name].vary:
+#                 continue
+#             param_values = np.array([p[param_name].value for p in params_history])
+#             aggregate_params[param_name].value = np.sum(weights * param_values)
+#             print('param', param_name)
+#             print('param values', param_values)
+#             print('final value', aggregate_params[param_name].value)
+#         minimize_resut.params = aggregate_params
+#         return minimize_resut
 
 
 class SEIRHidden(SEIR):
@@ -193,3 +199,17 @@ class SEIRHidden(SEIR):
             if not history.empty:
                 history.index = history.t
         return ret.T, history
+
+
+class EnsembleModel:
+    def __init__(self, models, weights):
+        self.models = models
+        self.weights = np.array(weights)
+
+    def predict(self, t, initial_conditions, history=True):
+        preds_histories = [model.predict(t, initial_conditions, history=history) for model in tqdm(self.models)]
+        preds = [np.array(p[0]) for p in preds_histories]
+
+        agg_preds = np.sum([self.weights[i] * preds[i] for i in range(len(preds_histories))], axis=0)
+
+        return agg_preds, preds_histories[-1][1]

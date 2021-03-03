@@ -136,14 +136,3 @@ def eval_k_days_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_point
         true_D.append(df[total_dead_col].iloc[eval_t].values)
 
     return pred_dates, baseline_pred_D, model_pred_D, true_D
-        #model_D_mae = round(mean_absolute_error(true_D, model_pred_D), 3)
-        #baseline_D_mae = round(mean_absolute_error(true_D, baseline_pred_D), 3)
-        #progress_bar.set_postfix({"Baseline MAE": baseline_D_mae, "Model MAE": model_D_mae})
-
-    #baseline_D_mae = mean_absolute_error(true_D, baseline_pred_D)
-
-    #model_D_mae = mean_absolute_error(true_D, model_pred_D)
-
-    #print('Baseline D mae', round(baseline_D_mae, 3))
-    #print('Model D mae', round(model_D_mae, 3))
-    #return baseline_D_mae, model_D_mae

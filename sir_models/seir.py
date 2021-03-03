@@ -13,11 +13,16 @@ class BaseFitter:
                  result=None,
                  verbose=True,
                  max_iters=None,
-                 brute_params=None):
+                 brute_params=None,
+                 save_params_every=100):
         self.result = result
         self.verbose = verbose
         self.max_iters = max_iters
         self.brute_params = brute_params or []
+
+        self.save_params_every = save_params_every
+        self.params_history = []
+        self.error_history = []
 
     def optimize(self, params, t, data, model, args, kwargs):
         with tqdm(total=self.max_iters) as pbar:
@@ -26,6 +31,11 @@ class BaseFitter:
                     pbar.n = iter
                     pbar.refresh()
                     pbar.set_postfix({"MARE": np.abs(resid).mean()})
+
+                if iter % self.save_params_every == 0 and iter > 0:
+                    error = np.abs(resid).mean()
+                    self.params_history.append(deepcopy(params))
+                    self.error_history.append(error)
 
             minimize_resut = minimize(self.residual,
                                       params,
@@ -215,7 +225,7 @@ class SEIR(BaseModel):
 
         params.add("sigmoid_r", value=20, min=1, max=30, vary=False)
         params.add("sigmoid_c", value=0.5, min=0, max=1, vary=False)
-        params.add("epidemic_started_days_ago", value=30, min=1, max=90, brute_step=10, vary=False)
+        params.add("epidemic_started_days_ago", value=10, min=1, max=90, brute_step=10, vary=False)
 
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=False)
         # Variable
