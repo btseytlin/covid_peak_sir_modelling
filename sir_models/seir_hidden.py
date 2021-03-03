@@ -5,6 +5,7 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 from tqdm.auto import tqdm
+from scipy.special import softmax
 from .utils import stepwise_soft, shift
 from .seir import SEIR, CurveFitter
 
@@ -56,6 +57,42 @@ class HiddenCurveFitter(CurveFitter):
             resid_D_new,
         ]).flatten()
         return residuals
+
+
+class EnsembleFitter(HiddenCurveFitter):
+    def optimize(self, params, t, data, model, args, kwargs):
+        params_history = []
+        error_history = []
+
+        with tqdm(total=self.max_iters) as pbar:
+            def callback(params, iter, resid, *args, **kwargs):
+                if iter % 10 == 0:
+                    pbar.n = iter
+                    pbar.refresh()
+                    error = np.abs(resid).mean()
+                    pbar.set_postfix({"MARE": error})
+
+                    params_history.append(params)
+                    error_history.append(error)
+
+            minimize_resut = minimize(self.residual,
+                                      params,
+                                      *args,
+                                      args=(t, data, model),
+                                      iter_cb=callback,
+                                      max_nfev=self.max_iters,
+                                      **kwargs)
+
+        weights = softmax(error_history)
+        aggregate_params = deepcopy(params_history[-1])
+        for param_name in params.keys():
+            agg_value = 0
+            for i in range(len(params_history)):
+                agg_value += weights[i] * params_history[i][param_name].value
+            aggregate_params[param_name].value = agg_value
+        minimize_resut.params = aggregate_params
+
+        return minimize_resut
 
 
 class SEIRHidden(SEIR):

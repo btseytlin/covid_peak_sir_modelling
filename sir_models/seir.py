@@ -25,7 +25,7 @@ class BaseFitter:
                 if iter % 10 == 0:
                     pbar.n = iter
                     pbar.refresh()
-                    pbar.set_postfix({"MAE": np.abs(resid).mean()})
+                    pbar.set_postfix({"MARE": np.abs(resid).mean()})
 
             minimize_resut = minimize(self.residual,
                                       params,

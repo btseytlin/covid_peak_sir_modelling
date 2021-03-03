@@ -100,3 +100,50 @@ def eval_one_day_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_poin
     return baseline_D_mae, model_D_mae
 
 
+def eval_k_days_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_points=100, total_dead_col='total_deaths',
+                       model_kwargs=None, fitter_kwargs=None, deaths_index_in_compartments=4, k=7):
+    model_kwargs = model_kwargs or {}
+    fitter_kwargs = fitter_kwargs or {'verbose': False}
+
+    eval_points = np.arange(eval_period_start, len(df), len(df) // n_eval_points)
+    pred_dates = []
+    true_D = []
+    baseline_pred_D = []
+    model_pred_D = []
+
+    progress_bar = tqdm(eval_points, total=len(eval_points))
+    for t in progress_bar:
+        train_df = df.iloc[:t]
+
+        model = model_cls(**model_kwargs)
+        fitter = fitter_cls(**fitter_kwargs)
+        fitter.fit(model, train_df)
+
+        train_initial_conditions = fitter.get_initial_conditions(model, train_df)
+        train_t = np.arange(len(train_df))
+        state, history = model.predict(train_t, train_initial_conditions)
+
+        test_initial_conds = [compartment[-1] for compartment in state]
+        eval_t = np.arange(train_t[-1]+1, t+k, 1)
+
+        state, history = model.predict(eval_t, test_initial_conds)
+
+        D = state[deaths_index_in_compartments]
+
+        pred_dates.append(df.date.iloc[t:t+k].values)
+        model_pred_D.append(D)
+        baseline_pred_D.append([train_df.iloc[-1][total_dead_col]] * k)
+        true_D.append(df[total_dead_col].iloc[eval_t].values)
+
+    return pred_dates, baseline_pred_D, model_pred_D, true_D
+        #model_D_mae = round(mean_absolute_error(true_D, model_pred_D), 3)
+        #baseline_D_mae = round(mean_absolute_error(true_D, baseline_pred_D), 3)
+        #progress_bar.set_postfix({"Baseline MAE": baseline_D_mae, "Model MAE": model_D_mae})
+
+    #baseline_D_mae = mean_absolute_error(true_D, baseline_pred_D)
+
+    #model_D_mae = mean_absolute_error(true_D, model_pred_D)
+
+    #print('Baseline D mae', round(baseline_D_mae, 3))
+    #print('Model D mae', round(model_D_mae, 3))
+    #return baseline_D_mae, model_D_mae
