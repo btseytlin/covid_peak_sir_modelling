@@ -5,7 +5,7 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 from tqdm.auto import tqdm
-from .utils import stepwise_soft, compute_daily_values
+from .utils import stepwise_soft
 
 
 class BaseFitter:
@@ -115,7 +115,7 @@ class CurveFitter(BaseFitter):
         initial_conditions = self.get_initial_conditions(model, data)
 
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=True)
-        new_exposed, new_infected, new_recovered, new_dead = compute_daily_values(S, E, I, R, D)
+        new_exposed, new_infected, new_recovered, new_dead = model.compute_daily_values(S, E, I, R, D)
         true_daily_cases = data[self.new_cases_col][:len(new_infected)].fillna(0)
         true_daily_deaths = data[self.new_deaths_col][:len(new_dead)].fillna(0)
 
@@ -142,6 +142,14 @@ class SEIR(BaseModel):
         super().__init__()
         self.stepwise_size = stepwise_size
         self.params = params
+
+    def compute_daily_values(self, S, E, I, R, D):
+        new_dead = np.diff(D)
+        new_recovered = np.diff(R)
+        new_infected = np.diff(I) + new_recovered + new_dead
+        new_exposed = np.diff(S[::-1])[::-1]
+
+        return new_exposed, new_infected, new_recovered, new_dead
 
     def step(self, initial_conditions, t, params, history_store):
         sus_population = params['sus_population']

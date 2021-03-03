@@ -4,13 +4,11 @@ from tqdm.auto import tqdm
 from matplotlib import pyplot as plt
 
 
-def compute_daily_values(S, E, I, R, D):
-    new_dead = np.diff(D)
-    new_recovered = np.diff(R)
-    new_infected = np.diff(I) + new_recovered + new_dead
-    new_exposed = np.diff(S[::-1])[::-1]
-
-    return new_exposed, new_infected, new_recovered, new_dead
+def shift(arr, num, fill_value=np.nan):
+    if num >= 0:
+        return np.concatenate((np.full(num, fill_value), arr[:-num]))
+    else:
+        return np.concatenate((arr[-num:], np.full(-num, fill_value)))
 
 
 def stepwise(t, coefficients):
@@ -57,7 +55,7 @@ def stepwise_soft(t, coefficients, r=20, c=0.5):
 
 
 def eval_one_day_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_points=100, total_dead_col='total_deaths',
-                       model_kwargs=None, fitter_kwargs=None):
+                       model_kwargs=None, fitter_kwargs=None, deaths_index_in_compartments=4):
     model_kwargs = model_kwargs or {}
     fitter_kwargs = fitter_kwargs or {'verbose': False}
 
@@ -79,11 +77,12 @@ def eval_one_day_ahead(df, model_cls, fitter_cls, eval_period_start, n_eval_poin
 
         train_initial_conditions = fitter.get_initial_conditions(model, train_df)
         train_t = np.arange(len(train_df))
-        (S, E, I, R, D), history = model.predict(train_t, train_initial_conditions)
+        state, history = model.predict(train_t, train_initial_conditions)
 
-        test_initial_conds = (S[-1], E[-1], I[-1], R[-1], D[-1])
-        (S, E, I, R, D), history = model.predict([train_t[-1], train_t[-1] + 1], test_initial_conds)
+        test_initial_conds = [compartment[-1] for compartment in state]
+        state, history = model.predict([train_t[-1], train_t[-1] + 1], test_initial_conds)
 
+        D = state[deaths_index_in_compartments]
         model_pred_D.append(D[-1])
         baseline_pred_D.append(pred_D)
         true_D.append(getattr(row, total_dead_col))

@@ -5,15 +5,14 @@ from scipy.integrate import odeint
 from lmfit import Parameters, minimize
 from copy import deepcopy
 from tqdm.auto import tqdm
-from .utils import stepwise_soft
-from .seir import SEIR, BaseFitter
+from .utils import stepwise_soft, shift
+from .seir import SEIR, CurveFitter
 
 
-class HiddenCurveFitter(BaseFitter):
+class HiddenCurveFitter(CurveFitter):
     def get_initial_conditions(self, model, data):
-        # Simulate such initial params as to obtain as many deaths as in data
-
         sus_population = model.params['sus_population']
+        epidemic_started_days_ago = model.params['epidemic_started_days_ago']
 
         new_params = deepcopy(model.params)
         for key, value in new_params.items():
@@ -21,42 +20,42 @@ class HiddenCurveFitter(BaseFitter):
                 new_params[key].value = 0
         new_model = SEIRHidden(params=new_params)
 
-        t = np.arange(365)
+        t = np.arange(epidemic_started_days_ago)
         (S, E, I, Iv, R, Rv, D, Dv), history = new_model.predict(t, (sus_population-1, 0, 1, 0, 0, 0, 0, 0), history=False)
-        fatality_day = np.argmax(Dv >= data.iloc[0].total_dead)
 
-        S0 = S[fatality_day]
-        E0 = E[fatality_day]
-        I0 = I[fatality_day]
-        Iv0 = Iv[fatality_day]
-        R0 = R[fatality_day]
-        Rv0 = Rv[fatality_day]
-        D0 = D[fatality_day]
-        Dv0 = Dv[fatality_day]
+        S0 = S[-1]
+        E0 = E[-1]
+        I0 = I[-1]
+        Iv0 = Iv[-1]
+        R0 = R[-1]
+        Rv0 = Rv[-1]
+        D0 = D[-1]
+        Dv0 = Dv[-1]
         return (S0, E0, I0, Iv0, R0, Rv0, D0, Dv0)
 
     def residual(self, params, t_vals, data, model):
         model.params = params
 
         initial_conditions = self.get_initial_conditions(model, data)
-        (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t_vals, initial_conditions, history=False)
 
-        resids = []
+        (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t_vals, initial_conditions, history=True)
+        (new_exposed,
+         new_infected_invisible, new_infected_visible,
+         new_recovered_invisible,
+         new_recovered_visible,
+         new_dead_invisible, new_dead_visible) = model.compute_daily_values(S, E, I, Iv, R, Rv, D, Dv)
+        true_daily_cases = data[self.new_cases_col][:len(new_infected_visible)].fillna(0)
+        true_daily_deaths = data[self.new_deaths_col][:len(new_dead_visible)].fillna(0)
 
-        if self.use_dead:
-            resid_D = (Dv - data['total_dead']) / data['total_dead'].std()
-            resids.append(resid_D)
-        if self.use_recovered:
-            resid_R = (Rv - data['total_recovered']) / data['total_recovered'].std() / 30
-            resids.append(resid_R)
+        resid_I_new = (new_infected_visible - true_daily_cases) / (np.maximum(new_infected_visible, true_daily_cases) + 1e-10)
 
-        residuals = np.concatenate(resids).flatten()
+        resid_D_new = (new_dead_visible - true_daily_deaths) / (np.maximum(new_dead_visible, true_daily_deaths) + 1e-10)
+
+        residuals = np.concatenate([
+            resid_I_new,
+            resid_D_new,
+        ]).flatten()
         return residuals
-
-
-
-# S -> E -> I -> R 
-#             -> D
 
 
 class SEIRHidden(SEIR):
@@ -121,6 +120,21 @@ class SEIRHidden(SEIR):
             history_store.append(history_record)
 
         return dSdt, dEdt, dIdt, dIvdt, dRdt, dRvdt, dDdt, dDvdt
+
+    def compute_daily_values(self, S, E, I, Iv, R, Rv, D, Dv):
+        new_dead_invisible = np.diff(D)
+        new_recovered_invisible = np.diff(R)
+        new_recovered_visible = np.diff(Rv)
+        new_exposed = np.diff(S[::-1])[::-1]
+
+        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * shift(Iv, 1)[1:]
+        new_dead_visible_from_I = np.diff(Dv) - new_dead_visible_from_Iv
+        new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
+
+        new_infected_visible = np.diff(Iv) + new_recovered_visible + new_dead_visible_from_Iv
+        new_infected_invisible = np.diff(I) + new_recovered_invisible + new_dead_visible_from_I
+
+        return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible
 
     def get_fit_params(self, data):
         params = super().get_fit_params(data)
