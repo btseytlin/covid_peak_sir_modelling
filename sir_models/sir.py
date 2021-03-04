@@ -153,7 +153,6 @@ class SIROneStain:
         self.i0 = best_params['i0']
         return self
 
-
     def _predict(self, t, initial_conditions):
         ret = odeint(sir_step_one_stain, initial_conditions, t, 
            args=(self.population, self.beta, self.gamma, self.alpha, self.rho))
