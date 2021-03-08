@@ -239,3 +239,108 @@ class SEIRHidden(SEIR):
         return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible
 
 
+class SEIRHiddenTwoStrains(SEIRHidden):
+
+    @classmethod
+    def from_strain_one_model(cls, model):
+        strain1_params = model.params
+        strain1_params.add("beta2_mult", value=1.5, min=1, max=2, vary=False)
+        return cls(params=deepcopy(strain1_params))
+
+    def get_fit_params(self, data):
+        raise Exception('2 strain models can\'t be fit. Fit a one strain model, then use `from_strain_one_model`')
+
+    def step(self, initial_conditions, t, params, history_store):
+        sus_population = params['sus_population']
+        delta = params['delta']
+        gamma = params['gamma']
+        alpha = params['alpha']
+        rho = params['rho']
+        pi = params['pi']
+        pd = params['pd']
+        beta2_mult = params['beta2_mult']
+
+        quarantine_mult, rt1, beta1 = self.get_step_rt_beta(t, params)
+
+        beta2 = beta2_mult * beta1
+        (S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv) = initial_conditions
+
+        new_exposed_strain1 = beta1 * I1 * (S / sus_population)
+        new_infected_invisible_strain1 = (1 - pi) * delta * E1
+        new_recovered_invisible_strain1 = gamma * (1 - alpha) * I1
+        new_dead_invisible_strain1 = (1 - pd) * alpha * rho * I1
+        new_dead_visible_from_I_strain1 = pd * alpha * rho * I1
+        new_infected_visible_strain1 = pi * delta * E1
+        new_recovered_visible_strain1 = gamma * (1 - alpha) * Iv1
+        new_dead_visible_from_Iv_strain1 = alpha * rho * Iv1
+
+        new_exposed_strain2 = beta2 * I2 * (S / sus_population)
+        new_infected_invisible_strain2 = (1 - pi) * delta * E2
+        new_recovered_invisible_strain2 = gamma * (1 - alpha) * I2
+        new_dead_invisible_strain2 = (1 - pd) * alpha * rho * I2
+        new_dead_visible_from_I_strain2 = pd * alpha * rho * I2
+        new_infected_visible_strain2 = pi * delta * E2
+        new_recovered_visible_strain2 = gamma * (1 - alpha) * Iv2
+        new_dead_visible_from_Iv_strain2 = alpha * rho * Iv2
+
+        dSdt = -(new_exposed_strain1 + new_exposed_strain2)
+
+        dE1dt = new_exposed_strain1 - new_infected_visible_strain1 - new_infected_invisible_strain1
+        dI1dt = new_infected_invisible_strain1 - new_recovered_invisible_strain1 - new_dead_invisible_strain1 - new_dead_visible_from_I_strain1
+        dIv1dt = new_infected_visible_strain1 - new_recovered_visible_strain1 - new_dead_visible_from_Iv_strain1
+
+        dE2dt = new_exposed_strain2 - new_infected_visible_strain2 - new_infected_invisible_strain2
+        dI2dt = new_infected_invisible_strain2 - new_recovered_invisible_strain2 - new_dead_invisible_strain2 - new_dead_visible_from_I_strain2
+        dIv2dt = new_infected_visible_strain2 - new_recovered_visible_strain2 - new_dead_visible_from_Iv_strain2
+
+        dRvdt = new_recovered_visible_strain1 + new_recovered_visible_strain2
+        dRdt = new_recovered_invisible_strain1 +  new_recovered_invisible_strain2
+        dDdt = new_dead_invisible_strain1 + new_dead_invisible_strain2
+
+        dDvdt = new_dead_visible_from_I_strain1 + new_dead_visible_from_Iv_strain1 + new_dead_visible_from_I_strain2 + new_dead_visible_from_Iv_strain2
+
+        assert S + E1 + I1 + Iv1 + E2 + I2 + Iv2 + R + Rv + D + Dv - sus_population <= 1e10
+        assert dSdt + dE1dt + dI1dt + dIv1dt + dE2dt + dI2dt + dIv2dt + dRdt + dRvdt + dDdt + dDvdt <= 1e10
+
+        if history_store is not None:
+            history_record = {
+                't': t,
+                'quarantine_mult': quarantine_mult,
+                'rt_strain1': rt1,
+                'rt_strain2': beta2_mult * rt1,
+                'beta_strain1': beta1,
+                'beta_strain2': beta2,
+                'new_exposed_strain1': new_exposed_strain1,
+                'new_infected_visible_strain1': new_infected_visible_strain1,
+                'new_dead_visible_strain1': new_dead_visible_from_I_strain1 + new_dead_visible_from_Iv_strain1,
+                'new_recovered_visible_strain1': new_recovered_visible_strain1,
+                'new_infected_invisible_strain1': new_infected_invisible_strain1,
+                'new_dead_invisible_strain1': new_dead_invisible_strain1,
+                'new_recovered_invisible_strain1': new_recovered_invisible_strain1,
+
+                'new_exposed_strain2': new_exposed_strain2,
+                'new_infected_visible_strain2': new_infected_visible_strain2,
+                'new_dead_visible_strain2': new_dead_visible_from_I_strain2 + new_dead_visible_from_Iv_strain2,
+                'new_recovered_visible_strain2': new_recovered_visible_strain2,
+                'new_infected_invisible_strain2': new_infected_invisible_strain2,
+                'new_dead_invisible_strain2': new_dead_invisible_strain2,
+                'new_recovered_invisible_strain2': new_recovered_invisible_strain2,
+            }
+            history_store.append(history_record)
+
+        return dSdt, dE1dt, dI1dt, dIv1dt,  dE2dt, dI2dt, dIv2dt, dRdt, dRvdt, dDdt, dDvdt
+
+    def compute_daily_values(self, S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv):
+        new_dead_invisible = np.diff(D)
+        new_recovered_invisible = np.diff(R)
+        new_recovered_visible = np.diff(Rv)
+        new_exposed = np.diff(S[::-1])[::-1]
+
+        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * shift(Iv1, 1)[1:]
+        new_dead_visible_from_I = np.diff(Dv) - new_dead_visible_from_Iv
+        new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
+
+        new_infected_visible = np.diff(Iv1) + new_recovered_visible + new_dead_visible_from_Iv
+        new_infected_invisible = np.diff(I1) + new_recovered_invisible + new_dead_visible_from_I
+
+        return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible

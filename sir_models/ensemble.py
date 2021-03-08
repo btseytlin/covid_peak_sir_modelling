@@ -26,7 +26,7 @@ class EnsembleModel:
         weighted_model_daily_vals = []
         model_states = []
         weighted_model_states = []
-        for i, model in tqdm(enumerate(self.models)):
+        for i, model in tqdm(enumerate(self.models), total=len(self.models)):
             model_initial_conditions = initial_conditions if initial_conditions is not None else model.get_initial_conditions(data)
 
             state, model_history = model.predict(t, model_initial_conditions, history=history)

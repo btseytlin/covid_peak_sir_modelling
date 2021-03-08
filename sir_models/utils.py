@@ -77,6 +77,7 @@ def eval_k_days_ahead(df, model_cls,
     true_D = []
     baseline_pred_D = []
     model_pred_D = []
+    fitters = []
 
     progress_bar = tqdm(eval_points, total=len(eval_points))
     for t in progress_bar:
@@ -86,7 +87,7 @@ def eval_k_days_ahead(df, model_cls,
         fitter = fitter_cls(**fitter_kwargs)
         fitter.fit(model, train_df)
 
-        train_initial_conditions = fitter.get_initial_conditions(model, train_df)
+        train_initial_conditions = model.get_initial_conditions(train_df)
         train_t = np.arange(len(train_df))
         state, history = model.predict(train_t, train_initial_conditions)
 
@@ -101,5 +102,6 @@ def eval_k_days_ahead(df, model_cls,
         model_pred_D.append(D)
         baseline_pred_D.append([train_df.iloc[-1][total_dead_col]] * k)
         true_D.append(df[total_dead_col].iloc[eval_t].values)
+        fitters.append(fitter)
 
-    return pred_dates, baseline_pred_D, model_pred_D, true_D
+    return pred_dates, baseline_pred_D, model_pred_D, true_D, fitters
