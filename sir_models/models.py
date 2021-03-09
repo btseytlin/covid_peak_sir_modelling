@@ -183,7 +183,7 @@ class SEIRHidden(SEIR):
 
         (S, E, I, Iv, R, Rv, D, Dv) = initial_conditions
 
-        new_exposed = beta * I * (S / sus_population)
+        new_exposed = beta * (I+Iv) * (S / sus_population)
         new_infected_invisible = (1 - pi) * delta * E
         new_recovered_invisible = gamma * (1 - alpha) * I
         new_dead_invisible = (1 - pd) * alpha * rho * I
@@ -265,7 +265,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         beta2 = beta2_mult * beta1
         (S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv) = initial_conditions
 
-        new_exposed_strain1 = beta1 * I1 * (S / sus_population)
+        new_exposed_strain1 = beta1 * (I1 + Iv1) * (S / sus_population)
         new_infected_invisible_strain1 = (1 - pi) * delta * E1
         new_recovered_invisible_strain1 = gamma * (1 - alpha) * I1
         new_dead_invisible_strain1 = (1 - pd) * alpha * rho * I1
@@ -274,7 +274,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         new_recovered_visible_strain1 = gamma * (1 - alpha) * Iv1
         new_dead_visible_from_Iv_strain1 = alpha * rho * Iv1
 
-        new_exposed_strain2 = beta2 * I2 * (S / sus_population)
+        new_exposed_strain2 = beta2 * (I2 + Iv2) * (S / sus_population)
         new_infected_invisible_strain2 = (1 - pi) * delta * E2
         new_recovered_invisible_strain2 = gamma * (1 - alpha) * I2
         new_dead_invisible_strain2 = (1 - pd) * alpha * rho * I2

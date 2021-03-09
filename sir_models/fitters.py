@@ -95,15 +95,11 @@ class BaseFitter:
 
 class CurveFitter(BaseFitter):
     def __init__(self, *args,
-                 total_deaths_col='total_deaths',
                  new_deaths_col='new_deaths',
-                 total_cases_col='total_cases',
                  new_cases_col='new_cases',
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.new_deaths_col = new_deaths_col
-        self.total_deaths_col = total_deaths_col
-        self.total_cases_col = total_cases_col
         self.new_cases_col = new_cases_col
 
     def residual(self, params, t_vals, data, model):
@@ -145,13 +141,6 @@ class HiddenCurveFitter(CurveFitter):
         resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible)
         resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible)
 
-        # print('True', true_daily_cases[:3])
-        # print('Forecast', new_infected_invisible[:3])
-        # print('Resids', resid_I_new[:3])
-        #
-        # print('Deaths True', true_daily_deaths[:3])
-        # print('Forecast', new_dead_visible[:3])
-        # print('Resids', resid_D_new[:3])
         residuals = np.concatenate([
             resid_I_new,
             resid_D_new,
