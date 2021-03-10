@@ -27,21 +27,30 @@ class BaseFitter:
         self.params_history = []
         self.error_history = []
 
+        self._last_resid = None
+        self._last_params = None
+        self._terminated = False
+
     def residual(self, params, t_vals, data, model):
         pass
 
     def optimize(self, params, t, data, model, *args, **kwargs):
         with tqdm(total=self.max_iters) as pbar:
             def callback(params, iter, resid, *args, **kwargs):
-                if iter % 10 == 0:
-                    pbar.n = iter
-                    pbar.refresh()
-                    pbar.set_postfix({"Error": np.abs(resid).mean()})
+                if iter != self.max_iters:
+                    self._last_resid = resid
+                    self._last_params = params
+                    if (iter % 10 == 0):
+                        pbar.n = iter
+                        pbar.refresh()
+                        pbar.set_postfix({"Error": np.abs(resid).mean()})
 
-                if iter % self.save_params_every == 0 and iter > 0:
-                    error = np.abs(resid).mean()
-                    self.params_history.append(deepcopy(params))
-                    self.error_history.append(error)
+                    if (iter % self.save_params_every == 0 and iter > 0):
+                        error = np.abs(resid).mean()
+                        self.params_history.append(deepcopy(params))
+                        self.error_history.append(error)
+                else:
+                    print('Reached max iters')
 
             minimize_result = minimize(self.residual,
                                       params,
@@ -51,8 +60,12 @@ class BaseFitter:
                                       max_nfev=self.max_iters,
                                       **kwargs)
 
-        self.error_history.append(np.abs(minimize_result.residual).mean())
-        self.params_history.append(minimize_result.params)
+        if not minimize_result.success:
+            minimize_result.params = self._last_params
+            minimize_result.residual = self._last_resid
+
+        self._last_resid = None
+        self._last_params = None
         return minimize_result
 
     def optimize_brute(self, params, param_name, brute_params, t, data, model, *args, **kwargs):
