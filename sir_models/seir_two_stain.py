@@ -8,7 +8,7 @@ from .utils import stepwise
 
 
 def seir_step_two_stain(initial_conditions, t, params, history_store):
-    sus_population = params['sus_population']
+    population = params['population']
     r0_1 = params['r0_1']
     r0_2 = params['r0_2']
     delta = params['delta']
@@ -25,19 +25,19 @@ def seir_step_two_stain(initial_conditions, t, params, history_store):
             q_coefs[coef_t] = value.value
 
     quarantine_mult = stepwise(t, q_coefs)
-    rt_1 = (r0_1 - quarantine_mult * r0_1)# * S / sus_population
+    rt_1 = (r0_1 - quarantine_mult * r0_1)# * S / population
     beta_1 = rt_1 * gamma
 
-    rt_2 = (r0_2 - quarantine_mult * r0_2)# * S / sus_population
+    rt_2 = (r0_2 - quarantine_mult * r0_2)# * S / population
     beta_2 = rt_2 * gamma
 
 
-    new_exposed1 = beta_1 * I1 * (S / sus_population)
+    new_exposed1 = beta_1 * I1 * (S / population)
     new_infected1 = delta * E1
     new_dead1 = alpha * rho * I1
     new_recovered1 = gamma * (1 - alpha) * I1
 
-    new_exposed2 = beta_2 * I2 * (S / sus_population)
+    new_exposed2 = beta_2 * I2 * (S / population)
     new_infected2 = delta * E2
     new_dead2 = alpha * rho * I2
     new_recovered2 = gamma * (1 - alpha) * I2
@@ -53,7 +53,7 @@ def seir_step_two_stain(initial_conditions, t, params, history_store):
     dRdt = new_recovered1 + new_recovered2
     dDdt = new_dead1 + new_dead2
 
-    assert sum([S, E1, I1, E2, I2, R, D]) - sus_population <= 1e10
+    assert sum([S, E1, I1, E2, I2, R, D]) - population <= 1e10
     assert dSdt + dE1dt + dI1dt + dE2dt + dI2dt + dRdt + dDdt <= 1e10
 
     if history_store is not None:
@@ -91,9 +91,7 @@ class SEIRTwoStain:
 
     def get_fit_params(self, data):
         params = Parameters()
-        params.add("base_population", value=12_000_000, vary=False)
-        params.add("pre_existing_immunity", value=0.1806, vary=False)
-        params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
+        params.add("population", value=12_000_000, vary=False)
         params.add("r0_1", value=3.55, vary=False)
         params.add("new_stain_mult", value=1.5, vary=False)
         params.add("r0_2", expr='r0_1 * new_stain_mult', vary=False)

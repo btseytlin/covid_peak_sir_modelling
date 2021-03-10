@@ -15,23 +15,24 @@ class SEIR:
 
     def get_fit_params(self, data):
         params = Parameters()
-        # Non-variable
-        params.add("base_population", value=12_000_000, vary=False)
-        params.add("pre_existing_immunity", value=0.1806, vary=False)
-        params.add("sus_population", expr='base_population - base_population * pre_existing_immunity', vary=False)
+        params.add("population", value=12_000_000, vary=False)
 
-        params.add("rho", value=1 / 14, min=1 / 20, max=1 / 7, vary=False)  # I -> D rate
-        params.add("alpha", value=0.0066, min=0.0001, max=0.05, vary=False)  # Probability to die if infected
+        params.add("sigmoid_r", value=20, min=1, max=30, brute_step=1, vary=False)
+        params.add("sigmoid_c", value=0.5, min=0, max=1, brute_step=0.1, vary=False)
 
-        params.add("sigmoid_r", value=20, min=1, max=30, vary=False)
-        params.add("sigmoid_c", value=0.5, min=0, max=1, vary=False)
         params.add("epidemic_started_days_ago", value=10, min=1, max=90, brute_step=10, vary=False)
 
+        params.add("r0", value=3, min=1.5, max=5, brute_step=0.05, vary=True)
+
+        params.add("alpha", value=0.0064, min=0.005, max=0.0078, brute_step=0.0005, vary=True)  # IFR
+        params.add("delta", value=1/7, min=1/14, max=1/2, vary=True)  # E -> I rate
+        params.add("gamma", value=1/8, min=1/14, max=1/7, vary=True)  # I -> R rate
+        params.add("rho", expr='gamma', vary=False)  # I -> D rate
+
+        params.add("incubation_days", expr='1/delta', vary=False)
+        params.add("infectious_days", expr='1/gamma', vary=False)
+
         params.add(f"t0_q", value=0, min=0, max=0.99, brute_step=0.1, vary=False)
-        # Variable
-        params.add("r0", value=3, min=1.5, max=6, vary=True)
-        params.add("delta", value=1 / 5.15, min=1 / 8, max=1 / 3, vary=True)  # E -> I rate
-        params.add("gamma", value=1 / 9.5, min=1 / 20, max=1 / 2, vary=True)  # I -> R rate
         piece_size = self.stepwise_size
         for t in range(piece_size, len(data), piece_size):
             params.add(f"t{t}_q", value=0.5, min=0, max=0.99, brute_step=0.1, vary=True)
@@ -39,7 +40,7 @@ class SEIR:
 
     def get_initial_conditions(self, data):
         # Simulate such initial params as to obtain as many deaths as in data
-        sus_population = self.params['sus_population']
+        population = self.params['population']
         epidemic_started_days_ago = self.params['epidemic_started_days_ago']
 
         new_params = deepcopy(self.params)
@@ -49,7 +50,7 @@ class SEIR:
         new_model = self.__class__(params=new_params)
 
         t = np.arange(epidemic_started_days_ago)
-        (S, E, I, R, D), history = new_model.predict(t, (sus_population - 1, 0, 1, 0, 0), history=False)
+        (S, E, I, R, D), history = new_model.predict(t, (population - 1, 0, 1, 0, 0), history=False)
 
         I0 = I[-1]
         E0 = E[-1]
@@ -84,7 +85,7 @@ class SEIR:
         return quarantine_mult, rt, beta
 
     def step(self, initial_conditions, t, params, history_store):
-        sus_population = params['sus_population']
+        population = params['population']
         delta = params['delta']
         gamma = params['gamma']
         alpha = params['alpha']
@@ -94,7 +95,7 @@ class SEIR:
 
         S, E, I, R, D = initial_conditions
 
-        new_exposed = beta * I * (S / sus_population)
+        new_exposed = beta * I * (S / population)
         new_infected = delta * E
         new_dead = alpha * rho * I
         new_recovered = gamma * (1 - alpha) * I
@@ -105,7 +106,7 @@ class SEIR:
         dRdt = new_recovered
         dDdt = new_dead
 
-        assert S + E + I + R + D - sus_population <= 1e10
+        assert S + E + I + R + D - population <= 1e10
         assert dSdt + dIdt + dEdt + dRdt + dDdt <= 1e10
 
         if history_store is not None:
@@ -143,12 +144,12 @@ class SEIRHidden(SEIR):
     def get_fit_params(self, data):
         params = super().get_fit_params(data)
 
-        params.add("pi", value=0.5, min=0.01, max=0.8, vary=True)  # Probability to discover a new infected case in a day
-        params.add("pd", value=0.5, min=0.01, max=0.8, vary=True)  # Probability to discover a death
+        params.add("pi", value=0.2, min=0.15, max=0.3, brute_step=0.01, vary=True)  # Probability to discover a new infected case in a day
+        params.add("pd", value=0.35, min=0.15, max=0.9, brute_step=0.05, vary=True)  # Probability to discover a death
         return params
 
     def get_initial_conditions(self, data):
-        sus_population = self.params['sus_population']
+        population = self.params['population']
         epidemic_started_days_ago = self.params['epidemic_started_days_ago']
 
         new_params = deepcopy(self.params)
@@ -158,7 +159,7 @@ class SEIRHidden(SEIR):
         new_model = self.__class__(params=new_params)
 
         t = np.arange(epidemic_started_days_ago)
-        (S, E, I, Iv, R, Rv, D, Dv), history = new_model.predict(t, (sus_population-1, 0, 1, 0, 0, 0, 0, 0), history=False)
+        (S, E, I, Iv, R, Rv, D, Dv), history = new_model.predict(t, (population-1, 0, 1, 0, 0, 0, 0, 0), history=False)
 
         S0 = S[-1]
         E0 = E[-1]
@@ -171,7 +172,7 @@ class SEIRHidden(SEIR):
         return (S0, E0, I0, Iv0, R0, Rv0, D0, Dv0)
 
     def step(self, initial_conditions, t, params, history_store):
-        sus_population = params['sus_population']
+        population = params['population']
         delta = params['delta']
         gamma = params['gamma']
         alpha = params['alpha']
@@ -183,7 +184,7 @@ class SEIRHidden(SEIR):
 
         (S, E, I, Iv, R, Rv, D, Dv) = initial_conditions
 
-        new_exposed = beta * (I+Iv) * (S / sus_population)
+        new_exposed = beta * (I+Iv) * (S / population)
         new_infected_invisible = (1 - pi) * delta * E
         new_recovered_invisible = gamma * (1 - alpha) * I
         new_dead_invisible = (1 - pd) * alpha * rho * I
@@ -202,7 +203,7 @@ class SEIRHidden(SEIR):
         dDdt = new_dead_invisible
         dDvdt = new_dead_visible_from_I + new_dead_visible_from_Iv
 
-        assert S + E + I + Iv + R + Rv + D + Dv - sus_population <= 1e10
+        assert S + E + I + Iv + R + Rv + D + Dv - population <= 1e10
         assert dSdt + dEdt + dIdt + dIvdt + dRdt + dRvdt + dDdt + dDvdt <= 1e10
 
         if history_store is not None:
@@ -251,7 +252,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         raise Exception('2 strain models can\'t be fit. Fit a one strain model, then use `from_strain_one_model`')
 
     def step(self, initial_conditions, t, params, history_store):
-        sus_population = params['sus_population']
+        population = params['population']
         delta = params['delta']
         gamma = params['gamma']
         alpha = params['alpha']
@@ -265,7 +266,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         beta2 = beta2_mult * beta1
         (S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv) = initial_conditions
 
-        new_exposed_strain1 = beta1 * (I1 + Iv1) * (S / sus_population)
+        new_exposed_strain1 = beta1 * (I1 + Iv1) * (S / population)
         new_infected_invisible_strain1 = (1 - pi) * delta * E1
         new_recovered_invisible_strain1 = gamma * (1 - alpha) * I1
         new_dead_invisible_strain1 = (1 - pd) * alpha * rho * I1
@@ -274,7 +275,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         new_recovered_visible_strain1 = gamma * (1 - alpha) * Iv1
         new_dead_visible_from_Iv_strain1 = alpha * rho * Iv1
 
-        new_exposed_strain2 = beta2 * (I2 + Iv2) * (S / sus_population)
+        new_exposed_strain2 = beta2 * (I2 + Iv2) * (S / population)
         new_infected_invisible_strain2 = (1 - pi) * delta * E2
         new_recovered_invisible_strain2 = gamma * (1 - alpha) * I2
         new_dead_invisible_strain2 = (1 - pd) * alpha * rho * I2
@@ -299,7 +300,7 @@ class SEIRHiddenTwoStrains(SEIRHidden):
 
         dDvdt = new_dead_visible_from_I_strain1 + new_dead_visible_from_Iv_strain1 + new_dead_visible_from_I_strain2 + new_dead_visible_from_Iv_strain2
 
-        assert S + E1 + I1 + Iv1 + E2 + I2 + Iv2 + R + Rv + D + Dv - sus_population <= 1e10
+        assert S + E1 + I1 + Iv1 + E2 + I2 + Iv2 + R + Rv + D + Dv - population <= 1e10
         assert dSdt + dE1dt + dI1dt + dIv1dt + dE2dt + dI2dt + dIv2dt + dRdt + dRvdt + dDdt + dDvdt <= 1e10
 
         if history_store is not None:

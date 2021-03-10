@@ -133,3 +133,4 @@ External/*
 data/moscow_prepared.csv
 
 .idea/*
+*.pkl
