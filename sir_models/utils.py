@@ -60,48 +60,30 @@ def stepwise_soft(t, coefficients, r=20, c=0.5):
     return out
 
 
-def eval_k_days_ahead(df, model_cls,
-                      fitter_cls,
-                      eval_period_start,
-                      n_eval_points=100,
-                      total_dead_col='total_deaths',
-                      model_kwargs=None,
-                      fitter_kwargs=None,
-                      deaths_index_in_compartments=4,
-                      k=7):
-    model_kwargs = model_kwargs or {}
-    fitter_kwargs = fitter_kwargs or {'verbose': False}
-
-    eval_points = np.arange(eval_period_start, (len(df)-k), (len(df)-k) // n_eval_points)
-    pred_dates = []
-    true_D = []
-    baseline_pred_D = []
-    model_pred_D = []
+def eval_on_select_dates_and_k_days_ahead(df,
+                                     eval_func,
+                                     eval_dates,
+                                     k=7):
+    train_dfs = []
+    test_dfs = []
+    model_predictions = []
     fitters = []
+    models = []
 
-    progress_bar = tqdm(eval_points, total=len(eval_points))
-    for t in progress_bar:
+    progress_bar = tqdm(eval_dates, total=len(eval_dates))
+    for date in progress_bar:
+        t = len(df[df.date < date])
         train_df = df.iloc[:t]
 
-        model = model_cls(**model_kwargs)
-        fitter = fitter_cls(**fitter_kwargs)
-        fitter.fit(model, train_df)
-
-        train_initial_conditions = model.get_initial_conditions(train_df)
         train_t = np.arange(len(train_df))
-        state, history = model.predict(train_t, train_initial_conditions)
+        eval_t = np.arange(train_t[-1] + 1, t + k, 1)
 
-        test_initial_conds = [compartment[-1] for compartment in state]
-        eval_t = np.arange(train_t[-1]+1, t+k, 1)
+        model, fitter, test_states = eval_func(train_df, t, train_t, eval_t)
 
-        state, history = model.predict(eval_t, test_initial_conds)
-
-        D = state[deaths_index_in_compartments]
-
-        pred_dates.append(df.date.iloc[t:t+k].values)
-        model_pred_D.append(D)
-        baseline_pred_D.append([train_df.iloc[-1][total_dead_col]] * k)
-        true_D.append(df[total_dead_col].iloc[eval_t].values)
+        train_dfs.append(train_df)
+        test_dfs.append(df.iloc[eval_t])
+        model_predictions.append(test_states)
         fitters.append(fitter)
+        models.append(model)
 
-    return pred_dates, baseline_pred_D, model_pred_D, true_D, fitters
+    return models, fitters, model_predictions, train_dfs, test_dfs

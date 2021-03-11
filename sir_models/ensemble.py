@@ -14,8 +14,13 @@ class EnsembleModel:
     def train(cls, model, fitter, data):
         fitter.fit(model, data)
 
-        weights = softmax(1 - np.array(fitter.error_history))
-        ensemble_model = cls([model.__class__(params=params) for params in fitter.params_history], weights)
+        if len(fitter.error_history) > 1:
+            weights = softmax(1 - np.array(fitter.error_history))
+            ensemble_model = cls([model.__class__(params=params) for params in fitter.params_history], weights)
+        else:
+            weights = np.array([1])
+            ensemble_model = cls([model], weights)
+
         ensemble_model.fitter = fitter
 
         return ensemble_model
