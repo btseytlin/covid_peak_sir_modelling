@@ -108,8 +108,8 @@ class BaseFitter:
 
 class CurveFitter(BaseFitter):
     def __init__(self, *args,
-                 new_deaths_col='new_deaths',
-                 new_cases_col='new_cases',
+                 new_deaths_col='deaths_per_day',
+                 new_cases_col='infected_per_day',
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.new_deaths_col = new_deaths_col
@@ -136,12 +136,20 @@ class CurveFitter(BaseFitter):
 
 
 class HiddenCurveFitter(CurveFitter):
+    def __init__(self, *args,
+                 new_recoveries_col='recovered_per_day',
+                 weights=None,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.new_recoveries_col = new_recoveries_col
+        self.weights = weights
+
     def residual(self, params, t_vals, data, model):
         model.params = params
 
         initial_conditions = model.get_initial_conditions(data)
 
-        (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t_vals, initial_conditions, history=True)
+        (S, E, I, Iv, R, Rv, D, Dv), history = model.predict(t_vals, initial_conditions, history=False)
         (new_exposed,
          new_infected_invisible, new_infected_visible,
          new_recovered_invisible,
@@ -149,13 +157,28 @@ class HiddenCurveFitter(CurveFitter):
          new_dead_invisible, new_dead_visible) = model.compute_daily_values(S, E, I, Iv, R, Rv, D, Dv)
         true_daily_cases = data[self.new_cases_col][:len(new_infected_visible)].values
         true_daily_deaths = data[self.new_deaths_col][:len(new_dead_visible)].values
+        true_daily_recoveries = data[self.new_recoveries_col][:len(new_recovered_visible)].values
 
+        deriv_1 = np.gradient(data[self.new_deaths_col], 10)
+        deriv_1 = np.pad(deriv_1, (len(data) - len(deriv_1), 0))
+        deriv_2 = np.gradient(deriv_1)
+        deriv_2 = np.pad(deriv_2, (len(data) - len(deriv_2), 0))
+        uncertanity = deriv_2[:len(new_infected_visible)] + 0.5
 
-        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible)
-        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible)
+        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible) / uncertanity
+        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible) / uncertanity
+        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered_visible) / uncertanity
 
-        residuals = np.concatenate([
-            resid_I_new,
-            resid_D_new,
-        ]).flatten()
+        if self.weights:
+            residuals = np.concatenate([
+                self.weights['I'] * resid_I_new,
+                self.weights['D'] * resid_D_new,
+                self.weights['R'] * resid_R_new,
+            ]).flatten()
+        else:
+            residuals = np.concatenate([
+                resid_I_new,
+                resid_D_new,
+                resid_R_new,
+            ]).flatten()
         return residuals

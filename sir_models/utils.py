@@ -63,14 +63,15 @@ def stepwise_soft(t, coefficients, r=20, c=0.5):
 def eval_on_select_dates_and_k_days_ahead(df,
                                      eval_func,
                                      eval_dates,
-                                     k=7):
+                                     k=7,
+                                     verbose=True):
     train_dfs = []
     test_dfs = []
     model_predictions = []
     fitters = []
     models = []
 
-    progress_bar = tqdm(eval_dates, total=len(eval_dates))
+    progress_bar = tqdm(eval_dates, total=len(eval_dates)) if verbose else eval_dates
     for date in progress_bar:
         t = len(df[df.date < date])
         train_df = df.iloc[:t]
