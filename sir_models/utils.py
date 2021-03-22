@@ -17,6 +17,10 @@ def shift(arr, num, fill_value=np.nan):
         return np.concatenate((arr[-num:], np.full(-num, fill_value)))
 
 
+def pad_left(arr, n_zeros=1):
+    return np.pad(arr, (n_zeros, 0))
+
+
 def stepwise(t, coefficients):
     t_arr = np.array(list(coefficients.keys()))
 
