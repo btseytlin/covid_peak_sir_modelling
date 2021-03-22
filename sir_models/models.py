@@ -4,7 +4,7 @@ from copy import deepcopy
 import lmfit
 from scipy.integrate import odeint
 from lmfit import Parameters
-from .utils import stepwise_soft, shift, pad_left
+from .utils import stepwise_soft, shift
 
 
 class SEIR:
@@ -22,10 +22,10 @@ class SEIR:
 
         params.add("epidemic_started_days_ago", value=10, min=1, max=90, brute_step=10, vary=False)
 
-        params.add("r0", value=4, min=1.5, max=5, brute_step=0.05, vary=True)
+        params.add("r0", value=4, min=3, max=5, brute_step=0.05, vary=True)
 
         params.add("alpha", value=0.0064, min=0.005, max=0.0078, brute_step=0.0005, vary=False)  # IFR
-        params.add("delta", value=1/3, min=1/14, max=1, vary=True)  # E -> I rate
+        params.add("delta", value=1/3, min=1/14, max=1/2, vary=True)  # E -> I rate
         params.add("gamma", value=1/9, min=1/14, max=1/7, vary=False)  # I -> R rate
         params.add("rho", expr='gamma', vary=False)  # I -> D rate
 
@@ -60,10 +60,10 @@ class SEIR:
         return (S0, E0, I0, Rec0, D0)
 
     def compute_daily_values(self, S, E, I, R, D):
-        new_dead = pad_left(np.diff(D))
-        new_recovered = pad_left(np.diff(R))
-        new_infected = pad_left(np.diff(I)) + new_recovered + new_dead
-        new_exposed = pad_left(np.diff(S[::-1])[::-1])
+        new_dead = (np.diff(D))
+        new_recovered = (np.diff(R))
+        new_infected = (np.diff(I)) + new_recovered + new_dead
+        new_exposed = (np.diff(S[::-1])[::-1])
 
         return new_exposed, new_infected, new_recovered, new_dead
 
@@ -225,17 +225,17 @@ class SEIRHidden(SEIR):
         return dSdt, dEdt, dIdt, dIvdt, dRdt, dRvdt, dDdt, dDvdt
 
     def compute_daily_values(self, S, E, I, Iv, R, Rv, D, Dv):
-        new_dead_invisible = pad_left(np.diff(D))
-        new_recovered_invisible = pad_left(np.diff(R))
-        new_recovered_visible = pad_left(np.diff(Rv))
-        new_exposed = pad_left(np.diff(S[::-1])[::-1])
+        new_dead_invisible = (np.diff(D))
+        new_recovered_invisible = (np.diff(R))
+        new_recovered_visible = (np.diff(Rv))
+        new_exposed = (np.diff(S[::-1])[::-1])
 
-        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * pad_left(shift(Iv, 1)[1:])
-        new_dead_visible_from_I = pad_left(np.diff(Dv)) - new_dead_visible_from_Iv
+        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * (shift(Iv, 1)[1:])
+        new_dead_visible_from_I = (np.diff(Dv)) - new_dead_visible_from_Iv
         new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
 
-        new_infected_visible = pad_left(np.diff(Iv)) + new_recovered_visible + new_dead_visible_from_Iv
-        new_infected_invisible = pad_left(np.diff(I)) + new_recovered_invisible + new_dead_visible_from_I
+        new_infected_visible = (np.diff(Iv)) + new_recovered_visible + new_dead_visible_from_Iv
+        new_infected_invisible = (np.diff(I)) + new_recovered_invisible + new_dead_visible_from_I
 
         return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible
 
@@ -332,16 +332,16 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         return dSdt, dE1dt, dI1dt, dIv1dt,  dE2dt, dI2dt, dIv2dt, dRdt, dRvdt, dDdt, dDvdt
 
     def compute_daily_values(self, S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv):
-        new_dead_invisible = pad_left(np.diff(D))
-        new_recovered_invisible = pad_left(np.diff(R))
-        new_recovered_visible = pad_left(np.diff(Rv))
-        new_exposed = pad_left(np.diff(S[::-1])[::-1])
+        new_dead_invisible = (np.diff(D))
+        new_recovered_invisible = (np.diff(R))
+        new_recovered_visible = (np.diff(Rv))
+        new_exposed = (np.diff(S[::-1])[::-1])
 
-        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * pad_left(shift(Iv1, 1)[1:])
-        new_dead_visible_from_I = pad_left(np.diff(Dv)) - new_dead_visible_from_Iv
+        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * (shift(Iv1, 1)[1:])
+        new_dead_visible_from_I = (np.diff(Dv)) - new_dead_visible_from_Iv
         new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
 
-        new_infected_visible = pad_left(np.diff(Iv1)) + new_recovered_visible + new_dead_visible_from_Iv
-        new_infected_invisible = pad_left(np.diff(I1)) + new_recovered_invisible + new_dead_visible_from_I
+        new_infected_visible = (np.diff(Iv1)) + new_recovered_visible + new_dead_visible_from_Iv
+        new_infected_invisible = (np.diff(I1)) + new_recovered_invisible + new_dead_visible_from_I
 
         return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible

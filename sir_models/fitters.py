@@ -122,8 +122,10 @@ class CurveFitter(BaseFitter):
 
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=True)
         new_exposed, new_infected, new_recovered, new_dead = model.compute_daily_values(S, E, I, R, D)
-        true_daily_cases = data[self.new_cases_col][:len(new_infected)]
-        true_daily_deaths = data[self.new_deaths_col][:len(new_dead)]
+        new_infected = new_infected[1:]
+        new_dead = new_dead[1:]
+        true_daily_cases = data[self.new_cases_col].values[1:]
+        true_daily_deaths = data[self.new_deaths_col].values[1:]
 
         resid_I_new = self.resid_transform(true_daily_cases, new_infected)
         resid_D_new = self.resid_transform(true_daily_deaths, new_dead)
@@ -155,19 +157,30 @@ class HiddenCurveFitter(CurveFitter):
          new_recovered_invisible,
          new_recovered_visible,
          new_dead_invisible, new_dead_visible) = model.compute_daily_values(S, E, I, Iv, R, Rv, D, Dv)
-        true_daily_cases = data[self.new_cases_col][:len(new_infected_visible)].values
-        true_daily_deaths = data[self.new_deaths_col][:len(new_dead_visible)].values
-        true_daily_recoveries = data[self.new_recoveries_col][:len(new_recovered_visible)].values
 
-        deriv_1 = np.gradient(data[self.new_deaths_col], 10)
-        deriv_1 = np.pad(deriv_1, (len(data) - len(deriv_1), 0))
-        deriv_2 = np.gradient(deriv_1)
-        deriv_2 = np.pad(deriv_2, (len(data) - len(deriv_2), 0))
-        uncertanity = deriv_2[:len(new_infected_visible)] + 0.5
+        new_infected_visible = new_infected_visible
+        new_dead_visible = new_dead_visible
+        new_recovered_visible = new_recovered_visible
 
-        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible) / uncertanity
-        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible) / uncertanity
-        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered_visible) / uncertanity
+        true_daily_cases = data[self.new_cases_col].values[1:]
+        true_daily_deaths = data[self.new_deaths_col].values[1:]
+        true_daily_recoveries = data[self.new_recoveries_col].values[1:]
+
+        def linefunc(x, k, b):
+            return k * x + b
+
+        # Line from 1 to b over len(t_vals) steps
+        min_line_val = 0.5
+        max_line_val = 1
+        b = min_line_val
+        k = (max_line_val - b) / np.max(t_vals)
+        certanity_from_time = np.array([linefunc(t, k, b) for t in t_vals])[1:]
+
+        certanity = certanity_from_time
+
+        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible) * certanity
+        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible) * certanity
+        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered_visible) * certanity
 
         if self.weights:
             residuals = np.concatenate([
@@ -181,4 +194,5 @@ class HiddenCurveFitter(CurveFitter):
                 resid_D_new,
                 resid_R_new,
             ]).flatten()
+
         return residuals
