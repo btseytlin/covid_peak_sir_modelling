@@ -166,21 +166,9 @@ class HiddenCurveFitter(CurveFitter):
         true_daily_deaths = data[self.new_deaths_col].values[1:]
         true_daily_recoveries = data[self.new_recoveries_col].values[1:]
 
-        def linefunc(x, k, b):
-            return k * x + b
-
-        # Line from 1 to b over len(t_vals) steps
-        min_line_val = 0.5
-        max_line_val = 1
-        b = min_line_val
-        k = (max_line_val - b) / np.max(t_vals)
-        certanity_from_time = np.array([linefunc(t, k, b) for t in t_vals])[1:]
-
-        certanity = certanity_from_time
-
-        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible) * certanity
-        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible) * certanity
-        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered_visible) * certanity
+        resid_I_new = self.resid_transform(true_daily_cases, new_infected_visible)
+        resid_D_new = self.resid_transform(true_daily_deaths, new_dead_visible)
+        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered_visible)
 
         if self.weights:
             residuals = np.concatenate([
