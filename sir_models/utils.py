@@ -1,5 +1,6 @@
 import numpy as np
 from tqdm.auto import tqdm
+from joblib import Parallel, delayed
 
 
 def smape(true, pred, eps=1e-5):
@@ -68,15 +69,11 @@ def eval_on_select_dates_and_k_days_ahead(df,
                                      eval_func,
                                      eval_dates,
                                      k=7,
-                                     verbose=True):
-    train_dfs = []
-    test_dfs = []
-    model_predictions = []
-    fitters = []
-    models = []
+                                     verbose=True,
+                                     n_jobs=-1):
 
-    progress_bar = tqdm(eval_dates, total=len(eval_dates)) if verbose else eval_dates
-    for date in progress_bar:
+
+    def process_date(date):
         t = len(df[df.date < date])
         train_df = df.iloc[:t]
 
@@ -85,10 +82,16 @@ def eval_on_select_dates_and_k_days_ahead(df,
 
         model, fitter, test_states = eval_func(train_df, t, train_t, eval_t)
 
-        train_dfs.append(train_df)
-        test_dfs.append(df.iloc[eval_t])
-        model_predictions.append(test_states)
-        fitters.append(fitter)
-        models.append(model)
+        test_df = df.iloc[eval_t]
+
+        return (train_df, test_df, test_states, fitter, model)
+
+    results = Parallel(n_jobs=n_jobs, verbose=11 if verbose else 0)(delayed(process_date)(date) for date in eval_dates)
+
+    train_dfs = [x[0] for x in results]
+    test_dfs = [x[1] for x in results]
+    model_predictions = [x[2] for x in results]
+    fitters = [x[3] for x in results]
+    models = [x[4] for x in results]
 
     return models, fitters, model_predictions, train_dfs, test_dfs
