@@ -24,7 +24,7 @@ class SEIR:
 
         params.add("r0", value=4, min=3, max=5, brute_step=0.05, vary=True)
 
-        params.add("alpha", value=0.0064, min=0.005, max=0.0078, brute_step=0.0005, vary=True)  # IFR
+        params.add("alpha", value=0.0064, min=0.005, max=0.0078, brute_step=0.0005, vary=False)  # IFR
         params.add("delta", value=1/3, min=1/14, max=1/2, vary=True)  # E -> I rate
         params.add("gamma", value=1/9, min=1/14, max=1/7, vary=False)  # I -> R rate
         params.add("rho", expr='gamma', vary=False)  # I -> D rate
