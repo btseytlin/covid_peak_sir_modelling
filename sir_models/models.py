@@ -111,7 +111,7 @@ class SEIR:
 
         if history_store is not None:
             history_record = {
-                't': t,
+                't': t+1,
                 'quarantine_mult': quarantine_mult,
                 'rt': rt,
                 'beta': beta,
@@ -185,59 +185,59 @@ class SEIRHidden(SEIR):
         (S, E, I, Iv, R, Rv, D, Dv) = initial_conditions
 
         new_exposed = beta * (I+Iv) * (S / population)
-        new_infected_invisible = (1 - pi) * delta * E
-        new_recovered_invisible = gamma * (1 - alpha) * I
-        new_dead_invisible = (1 - pd) * alpha * rho * I
-        new_dead_visible_from_I = pd * alpha * rho * I
+        new_infected_inv = (1 - pi) * delta * E
+        new_recovered_inv = gamma * (1 - alpha) * I
+        new_dead_inv = (1 - pd) * alpha * rho * I
+        new_dead_vis_from_I = pd * alpha * rho * I
 
-        new_infected_visible = pi * delta * E
-        new_recovered_visible = gamma * (1 - alpha) * Iv
-        new_dead_visible_from_Iv = alpha * rho * Iv
+        new_infected_vis = pi * delta * E
+        new_recovered_vis = gamma * (1 - alpha) * Iv
+        new_dead_vis_from_Iv = alpha * rho * Iv
 
         dSdt = -new_exposed
-        dEdt = new_exposed - new_infected_visible - new_infected_invisible
-        dIdt = new_infected_invisible - new_recovered_invisible - new_dead_invisible - new_dead_visible_from_I
-        dIvdt = new_infected_visible - new_recovered_visible - new_dead_visible_from_Iv
-        dRdt = new_recovered_invisible
-        dRvdt = new_recovered_visible
-        dDdt = new_dead_invisible
-        dDvdt = new_dead_visible_from_I + new_dead_visible_from_Iv
+        dEdt = new_exposed - new_infected_vis - new_infected_inv
+        dIdt = new_infected_inv - new_recovered_inv - new_dead_inv - new_dead_vis_from_I
+        dIvdt = new_infected_vis - new_recovered_vis - new_dead_vis_from_Iv
+        dRdt = new_recovered_inv
+        dRvdt = new_recovered_vis
+        dDdt = new_dead_inv
+        dDvdt = new_dead_vis_from_I + new_dead_vis_from_Iv
 
         assert S + E + I + Iv + R + Rv + D + Dv - population <= 1e10
         assert dSdt + dEdt + dIdt + dIvdt + dRdt + dRvdt + dDdt + dDvdt <= 1e10
 
         if history_store is not None:
             history_record = {
-                't': t,
+                't': t+1,
                 'quarantine_mult': quarantine_mult,
                 'rt': rt,
                 'beta': beta,
                 'new_exposed': new_exposed,
-                'new_infected_visible': new_infected_visible,
-                'new_dead_visible': new_dead_visible_from_I + new_dead_visible_from_Iv,
-                'new_recovered_visible': new_recovered_visible,
-                'new_infected_invisible': new_infected_invisible,
-                'new_dead_invisible': new_dead_invisible,
-                'new_recovered_invisible': new_recovered_invisible,
+                'new_infected_vis': new_infected_vis,
+                'new_dead_vis': new_dead_vis_from_I + new_dead_vis_from_Iv,
+                'new_recovered_vis': new_recovered_vis,
+                'new_infected_inv': new_infected_inv,
+                'new_dead_inv': new_dead_inv,
+                'new_recovered_inv': new_recovered_inv,
             }
             history_store.append(history_record)
 
         return dSdt, dEdt, dIdt, dIvdt, dRdt, dRvdt, dDdt, dDvdt
 
     def compute_daily_values(self, S, E, I, Iv, R, Rv, D, Dv):
-        new_dead_invisible = (np.diff(D))
-        new_recovered_invisible = (np.diff(R))
-        new_recovered_visible = (np.diff(Rv))
+        new_dead_inv = (np.diff(D))
+        new_recovered_inv = (np.diff(R))
+        new_recovered_vis = (np.diff(Rv))
         new_exposed = (np.diff(S[::-1])[::-1])
 
-        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * (shift(Iv, 1)[1:])
-        new_dead_visible_from_I = (np.diff(Dv)) - new_dead_visible_from_Iv
-        new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
+        new_dead_vis_from_Iv = self.params['alpha'] * self.params['rho'] * (shift(Iv, 1)[1:])
+        new_dead_vis_from_I = (np.diff(Dv)) - new_dead_vis_from_Iv
+        new_dead_vis = new_dead_vis_from_Iv + new_dead_vis_from_I
 
-        new_infected_visible = (np.diff(Iv)) + new_recovered_visible + new_dead_visible_from_Iv
-        new_infected_invisible = (np.diff(I)) + new_recovered_invisible + new_dead_visible_from_I
+        new_infected_vis = (np.diff(Iv)) + new_recovered_vis + new_dead_vis_from_Iv
+        new_infected_inv = (np.diff(I)) + new_recovered_inv + new_dead_vis_from_I
 
-        return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible
+        return new_exposed, new_infected_inv, new_infected_vis, new_recovered_inv, new_recovered_vis, new_dead_inv, new_dead_vis
 
 
 class SEIRHiddenTwoStrains(SEIRHidden):
@@ -266,82 +266,109 @@ class SEIRHiddenTwoStrains(SEIRHidden):
         beta2 = beta2_mult * beta1
         (S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv) = initial_conditions
 
-        new_exposed_strain1 = beta1 * (I1 + Iv1) * (S / population)
-        new_infected_invisible_strain1 = (1 - pi) * delta * E1
-        new_recovered_invisible_strain1 = gamma * (1 - alpha) * I1
-        new_dead_invisible_strain1 = (1 - pd) * alpha * rho * I1
-        new_dead_visible_from_I_strain1 = pd * alpha * rho * I1
-        new_infected_visible_strain1 = pi * delta * E1
-        new_recovered_visible_strain1 = gamma * (1 - alpha) * Iv1
-        new_dead_visible_from_Iv_strain1 = alpha * rho * Iv1
+        new_exposed_s1 = beta1 * (I1 + Iv1) * (S / population)
+        new_infected_inv_s1 = (1 - pi) * delta * E1
+        new_infected_vis_s1 = pi * delta * E1
+        new_recovered_inv_s1 = gamma * (1 - alpha) * I1
+        new_recovered_vis_s1 = gamma * (1 - alpha) * Iv1
+        new_dead_inv_s1 = (1 - pd) * alpha * rho * I1
+        new_dead_vis_from_I_s1 = pd * alpha * rho * I1
+        new_dead_vis_from_Iv_s1 = alpha * rho * Iv1
 
-        new_exposed_strain2 = beta2 * (I2 + Iv2) * (S / population)
-        new_infected_invisible_strain2 = (1 - pi) * delta * E2
-        new_recovered_invisible_strain2 = gamma * (1 - alpha) * I2
-        new_dead_invisible_strain2 = (1 - pd) * alpha * rho * I2
-        new_dead_visible_from_I_strain2 = pd * alpha * rho * I2
-        new_infected_visible_strain2 = pi * delta * E2
-        new_recovered_visible_strain2 = gamma * (1 - alpha) * Iv2
-        new_dead_visible_from_Iv_strain2 = alpha * rho * Iv2
+        new_exposed_s2 = beta2 * (I2 + Iv2) * (S / population)
+        new_infected_inv_s2 = (1 - pi) * delta * E2
+        new_infected_vis_s2 = pi * delta * E2
+        new_recovered_inv_s2 = gamma * (1 - alpha) * I2
+        new_recovered_vis_s2 = gamma * (1 - alpha) * Iv2
+        new_dead_inv_s2 = (1 - pd) * alpha * rho * I2
+        new_dead_vis_from_I_s2 = pd * alpha * rho * I2
+        new_dead_vis_from_Iv_s2 = alpha * rho * Iv2
 
-        dSdt = -(new_exposed_strain1 + new_exposed_strain2)
+        dSdt = -(new_exposed_s1 + new_exposed_s2)
 
-        dE1dt = new_exposed_strain1 - new_infected_visible_strain1 - new_infected_invisible_strain1
-        dI1dt = new_infected_invisible_strain1 - new_recovered_invisible_strain1 - new_dead_invisible_strain1 - new_dead_visible_from_I_strain1
-        dIv1dt = new_infected_visible_strain1 - new_recovered_visible_strain1 - new_dead_visible_from_Iv_strain1
+        dE1dt = new_exposed_s1 - new_infected_vis_s1 - new_infected_inv_s1
+        dI1dt = new_infected_inv_s1 - new_recovered_inv_s1 - new_dead_inv_s1 - new_dead_vis_from_I_s1
+        dIv1dt = new_infected_vis_s1 - new_recovered_vis_s1 - new_dead_vis_from_Iv_s1
 
-        dE2dt = new_exposed_strain2 - new_infected_visible_strain2 - new_infected_invisible_strain2
-        dI2dt = new_infected_invisible_strain2 - new_recovered_invisible_strain2 - new_dead_invisible_strain2 - new_dead_visible_from_I_strain2
-        dIv2dt = new_infected_visible_strain2 - new_recovered_visible_strain2 - new_dead_visible_from_Iv_strain2
+        dE2dt = new_exposed_s2 - new_infected_vis_s2 - new_infected_inv_s2
+        dI2dt = new_infected_inv_s2 - new_recovered_inv_s2 - new_dead_inv_s2 - new_dead_vis_from_I_s2
+        dIv2dt = new_infected_vis_s2 - new_recovered_vis_s2 - new_dead_vis_from_Iv_s2
 
-        dRvdt = new_recovered_visible_strain1 + new_recovered_visible_strain2
-        dRdt = new_recovered_invisible_strain1 +  new_recovered_invisible_strain2
-        dDdt = new_dead_invisible_strain1 + new_dead_invisible_strain2
-
-        dDvdt = new_dead_visible_from_I_strain1 + new_dead_visible_from_Iv_strain1 + new_dead_visible_from_I_strain2 + new_dead_visible_from_Iv_strain2
+        dRdt = new_recovered_inv_s1 + new_recovered_inv_s2
+        dRvdt = new_recovered_vis_s1 + new_recovered_vis_s2
+        dDdt = new_dead_inv_s1 + new_dead_inv_s2
+        dDvdt = new_dead_vis_from_I_s1 + new_dead_vis_from_Iv_s1 + new_dead_vis_from_I_s2 + new_dead_vis_from_Iv_s2
 
         assert S + E1 + I1 + Iv1 + E2 + I2 + Iv2 + R + Rv + D + Dv - population <= 1e10
         assert dSdt + dE1dt + dI1dt + dIv1dt + dE2dt + dI2dt + dIv2dt + dRdt + dRvdt + dDdt + dDvdt <= 1e10
 
-        if history_store is not None:
-            history_record = {
-                't': t,
-                'quarantine_mult': quarantine_mult,
-                'rt_strain1': rt1,
-                'rt_strain2': beta2_mult * rt1,
-                'beta_strain1': beta1,
-                'beta_strain2': beta2,
-                'new_exposed_strain1': new_exposed_strain1,
-                'new_infected_visible_strain1': new_infected_visible_strain1,
-                'new_dead_visible_strain1': new_dead_visible_from_I_strain1 + new_dead_visible_from_Iv_strain1,
-                'new_recovered_visible_strain1': new_recovered_visible_strain1,
-                'new_infected_invisible_strain1': new_infected_invisible_strain1,
-                'new_dead_invisible_strain1': new_dead_invisible_strain1,
-                'new_recovered_invisible_strain1': new_recovered_invisible_strain1,
+        history_record = {
+            't': t+1,
+            'quarantine_mult': quarantine_mult,
+            'rt_strain1': rt1,
+            'rt_strain2': beta2_mult * rt1,
+            'beta_strain1': beta1,
+            'beta_strain2': beta2,
+            'new_exposed_s1': new_exposed_s1,
+            'new_infected_inv_s1': new_infected_inv_s1,
+            'new_infected_vis_s1': new_infected_vis_s1,
+            'new_recovered_inv_s1': new_recovered_inv_s1,
+            'new_recovered_vis_s1': new_recovered_vis_s1,
+            'new_dead_inv_s1': new_dead_inv_s1,
+            'new_dead_vis_s1': new_dead_vis_from_I_s1 + new_dead_vis_from_Iv_s1,
 
-                'new_exposed_strain2': new_exposed_strain2,
-                'new_infected_visible_strain2': new_infected_visible_strain2,
-                'new_dead_visible_strain2': new_dead_visible_from_I_strain2 + new_dead_visible_from_Iv_strain2,
-                'new_recovered_visible_strain2': new_recovered_visible_strain2,
-                'new_infected_invisible_strain2': new_infected_invisible_strain2,
-                'new_dead_invisible_strain2': new_dead_invisible_strain2,
-                'new_recovered_invisible_strain2': new_recovered_invisible_strain2,
-            }
+            'new_exposed_s2': new_exposed_s2,
+            'new_infected_inv_s2': new_infected_inv_s2,
+            'new_infected_vis_s2': new_infected_vis_s2,
+            'new_recovered_inv_s2': new_recovered_inv_s2,
+            'new_recovered_vis_s2': new_recovered_vis_s2,
+            'new_dead_inv_s2': new_dead_inv_s2,
+            'new_dead_vis_s2': new_dead_vis_from_I_s2 + new_dead_vis_from_Iv_s2,
+        }
+        if history_store is not None:
             history_store.append(history_record)
 
         return dSdt, dE1dt, dI1dt, dIv1dt,  dE2dt, dI2dt, dIv2dt, dRdt, dRvdt, dDdt, dDvdt
 
     def compute_daily_values(self, S, E1, I1, Iv1, E2, I2, Iv2, R, Rv, D, Dv):
-        new_dead_invisible = (np.diff(D))
-        new_recovered_invisible = (np.diff(R))
-        new_recovered_visible = (np.diff(Rv))
-        new_exposed = (np.diff(S[::-1])[::-1])
+        pd = self.params['pd']
+        pi = self.params['pi']
+        delta = self.params['delta']
+        alpha = self.params['alpha']
+        rho = self.params['rho']
+        gamma = self.params['gamma']
 
-        new_dead_visible_from_Iv = self.params['alpha'] * self.params['rho'] * (shift(Iv1, 1)[1:])
-        new_dead_visible_from_I = (np.diff(Dv)) - new_dead_visible_from_Iv
-        new_dead_visible = new_dead_visible_from_Iv + new_dead_visible_from_I
+        new_dead_inv_s1 = (1 - pd) * alpha * rho * shift(I1, 1)[1:]
+        new_recovered_inv_s1 = gamma * (1 - alpha) * shift(I1, 1)[1:]
+        new_recovered_vis_s1 = gamma * (1 - alpha) * shift(Iv1, 1)[1:]
+        new_dead_vis_from_I_s1 = pd * alpha * rho * shift(I1, 1)[1:]
+        new_dead_vis_from_Iv_s1 = alpha * rho * shift(Iv1, 1)[1:]
+        new_dead_vis_s1 = new_dead_vis_from_I_s1 + new_dead_vis_from_Iv_s1
+        new_infected_inv_s1 = np.diff(I1) + new_recovered_inv_s1 + new_dead_inv_s1 + new_dead_vis_from_I_s1
+        new_infected_vis_s1 = pi * delta * shift(E1, 1)[1:]
+        new_exposed_s1 = np.diff(E1) + new_infected_vis_s1 + new_infected_inv_s1
 
-        new_infected_visible = (np.diff(Iv1)) + new_recovered_visible + new_dead_visible_from_Iv
-        new_infected_invisible = (np.diff(I1)) + new_recovered_invisible + new_dead_visible_from_I
+        new_dead_inv_s2 = (1 - pd) * alpha * rho * shift(I2, 1)[1:]
+        new_recovered_inv_s2 = gamma * (1 - alpha) * shift(I2, 1)[1:]
+        new_recovered_vis_s2 = gamma * (1 - alpha) * shift(Iv2, 1)[1:]
+        new_dead_vis_from_I_s2 = pd * alpha * rho * shift(I2, 1)[1:]
+        new_dead_vis_from_Iv_s2 = alpha * rho * shift(Iv2, 1)[1:]
+        new_dead_vis_s2 = new_dead_vis_from_I_s2 + new_dead_vis_from_Iv_s2
+        new_infected_inv_s2 = np.diff(I2) + new_recovered_inv_s2 + new_dead_inv_s2 + new_dead_vis_from_I_s2
+        new_infected_vis_s2 = pi * delta * shift(E2, 1)[1:]
+        new_exposed_s2 = np.diff(E2) + new_infected_vis_s2 + new_infected_inv_s2
+        return (new_exposed_s1,
+                new_infected_inv_s1,
+                new_infected_vis_s1,
+                new_recovered_inv_s1,
+                new_recovered_vis_s1,
+                new_dead_inv_s1,
+                new_dead_vis_s1,
 
-        return new_exposed, new_infected_invisible, new_infected_visible, new_recovered_invisible, new_recovered_visible, new_dead_invisible, new_dead_visible
+                new_exposed_s2,
+                new_infected_inv_s2,
+                new_infected_vis_s2,
+                new_recovered_inv_s2,
+                new_recovered_vis_s2,
+                new_dead_inv_s2,
+                new_dead_vis_s2)
