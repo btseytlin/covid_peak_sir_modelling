@@ -110,10 +110,14 @@ class CurveFitter(BaseFitter):
     def __init__(self, *args,
                  new_deaths_col='deaths_per_day',
                  new_cases_col='infected_per_day',
+                 new_recoveries_col='recovered_per_day',
+                 weights=None,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.new_deaths_col = new_deaths_col
         self.new_cases_col = new_cases_col
+        self.new_recoveries_col = new_recoveries_col
+        self.weights = weights
 
     def residual(self, params, t_vals, data, model):
         model.params = params
@@ -122,18 +126,26 @@ class CurveFitter(BaseFitter):
 
         (S, E, I, R, D), history = model.predict(t_vals, initial_conditions, history=True)
         new_exposed, new_infected, new_recovered, new_dead = model.compute_daily_values(S, E, I, R, D)
-        new_infected = new_infected[1:]
-        new_dead = new_dead[1:]
         true_daily_cases = data[self.new_cases_col].values[1:]
         true_daily_deaths = data[self.new_deaths_col].values[1:]
+        true_daily_recoveries = data[self.new_recoveries_col].values[1:]
 
         resid_I_new = self.resid_transform(true_daily_cases, new_infected)
         resid_D_new = self.resid_transform(true_daily_deaths, new_dead)
+        resid_R_new = self.resid_transform(true_daily_recoveries, new_recovered)
 
-        residuals = np.concatenate([
-            resid_I_new,
-            resid_D_new,
-        ]).flatten()
+        if self.weights:
+            residuals = np.concatenate([
+                self.weights['I'] * resid_I_new,
+                self.weights['D'] * resid_D_new,
+                self.weights['R'] * resid_R_new,
+            ]).flatten()
+        else:
+            residuals = np.concatenate([
+                resid_I_new,
+                resid_D_new,
+                resid_R_new,
+            ]).flatten()
         return residuals
 
 
